@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "6dd5fdfa-30ba-471f-8d47-e374016f2a0f",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/ivan/Documents/engram/.archify/workflow-fenced-tasks-20261124-004100/candidate.json",
+  "output": "/Users/ivan/Documents/engram/.archify/workflow-fenced-tasks-20261124-004100/fenced-tasks-workflow.html",
+  "specification": {
+    "sha256": "83ab47dcecfae830d27e23ab8aea084e26f053844341be81b92f2f56c0f6b46f",
+    "bytes": 6221
+  },
+  "artifact": {
+    "sha256": "a1a8702956b9daa0c9b222bb72e940e080f76515a98e6b1b0e3add9ea2885367",
+    "bytes": 944687
+  }
+}

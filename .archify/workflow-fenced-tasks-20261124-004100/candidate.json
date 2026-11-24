@@ -1,0 +1,275 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Flujo de Reclamo Vallado de Tareas & Cuarentena Poison-Pill",
+    "locale": "es",
+    "output": ".archify/workflow-fenced-tasks-20261124-004100/fenced-tasks-workflow.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "agent_lane",
+      "label": "Agente Worker"
+    },
+    {
+      "id": "mcp_lane",
+      "label": "Superficie MCP"
+    },
+    {
+      "id": "state_lane",
+      "label": "Servicio de Estado & Transacción"
+    },
+    {
+      "id": "db_lane",
+      "label": "PostgreSQL 18"
+    },
+    {
+      "id": "quarantine_lane",
+      "label": "Cuarentena & Autopsia",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phase_claim",
+      "label": "1. Reclamo & Lock",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "phase_exec",
+      "label": "2. Ejecución & Heartbeat",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "phase_res",
+      "label": "3. Resolución o Autopsia",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "agent_worker",
+    "claim_tool",
+    "query_skip_locked",
+    "row_lock",
+    "eval_retries",
+    "grant_lease",
+    "work_loop",
+    "eval_outcome",
+    "handoff_record",
+    "complete_task"
+  ],
+  "nodes": [
+    {
+      "id": "agent_worker",
+      "lane": "agent_lane",
+      "col": 0,
+      "type": "external",
+      "label": "Worker Agent",
+      "sublabel": "busca trabajo"
+    },
+    {
+      "id": "claim_tool",
+      "lane": "mcp_lane",
+      "col": 0,
+      "type": "backend",
+      "label": "claim_task",
+      "sublabel": "JSON-RPC tool"
+    },
+    {
+      "id": "query_skip_locked",
+      "lane": "state_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "Claim CTE",
+      "sublabel": "SKIP LOCKED",
+      "tag": "exclusión mutua"
+    },
+    {
+      "id": "row_lock",
+      "lane": "db_lane",
+      "col": 1,
+      "type": "database",
+      "label": "Bloqueo de Fila",
+      "sublabel": "agent_tasks",
+      "tag": "claim_count++"
+    },
+    {
+      "id": "eval_retries",
+      "lane": "state_lane",
+      "col": 2,
+      "type": "security",
+      "label": "Check Reintentos",
+      "sublabel": "retries >= 3?",
+      "tag": "filtro veneno"
+    },
+    {
+      "id": "grant_lease",
+      "lane": "mcp_lane",
+      "col": 2,
+      "type": "backend",
+      "label": "Lease Concedido",
+      "sublabel": "UUID lease_id",
+      "tag": "TTL 300s"
+    },
+    {
+      "id": "work_loop",
+      "lane": "agent_lane",
+      "col": 3,
+      "type": "external",
+      "label": "Ejecución de Tarea",
+      "sublabel": "diffs & tests"
+    },
+    {
+      "id": "heartbeat",
+      "lane": "mcp_lane",
+      "col": 3,
+      "type": "backend",
+      "label": "renew_task_lease",
+      "sublabel": "valida fencing",
+      "tag": "fencing token"
+    },
+    {
+      "id": "eval_outcome",
+      "lane": "agent_lane",
+      "col": 4,
+      "type": "external",
+      "label": "Resultado",
+      "sublabel": "éxito / crash"
+    },
+    {
+      "id": "handoff_record",
+      "lane": "state_lane",
+      "col": 4,
+      "type": "backend",
+      "label": "record_handoff",
+      "sublabel": "<150 palabras",
+      "tag": "evidencia estricta"
+    },
+    {
+      "id": "complete_task",
+      "lane": "state_lane",
+      "col": 5,
+      "type": "backend",
+      "label": "complete_task",
+      "sublabel": "status: completed",
+      "tag": "libera lease"
+    },
+    {
+      "id": "poison_pill_fail",
+      "lane": "quarantine_lane",
+      "col": 2,
+      "type": "security",
+      "label": "Cuarentena Automática",
+      "sublabel": "status: failed",
+      "tag": "tumba autopsia"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "agent_worker",
+      "to": "claim_tool",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e2",
+      "from": "claim_tool",
+      "to": "query_skip_locked",
+      "variant": "default"
+    },
+    {
+      "id": "e3",
+      "from": "query_skip_locked",
+      "to": "row_lock",
+      "label": "FOR UPDATE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e4",
+      "from": "row_lock",
+      "to": "eval_retries",
+      "variant": "default"
+    },
+    {
+      "id": "e5",
+      "from": "eval_retries",
+      "to": "grant_lease",
+      "label": "retries < 3",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e5_fail",
+      "from": "eval_retries",
+      "to": "poison_pill_fail",
+      "label": "retries >= 3",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e6",
+      "from": "grant_lease",
+      "to": "work_loop",
+      "label": "token lease_id",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e7",
+      "from": "work_loop",
+      "to": "heartbeat",
+      "label": "latido periódico",
+      "variant": "dashed"
+    },
+    {
+      "id": "e8",
+      "from": "work_loop",
+      "to": "eval_outcome",
+      "variant": "default"
+    },
+    {
+      "id": "e9",
+      "from": "eval_outcome",
+      "to": "handoff_record",
+      "label": "PASS / FAIL",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e10",
+      "from": "handoff_record",
+      "to": "complete_task",
+      "label": "fencing verificado",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Exclusión Mutua Sin Deadlocks",
+      "items": [
+        "SELECT FOR UPDATE SKIP LOCKED ignora filas actualmente bloqueadas por workers concurrentes.",
+        "Garantiza escalamiento horizontal de agentes sin contención ni doble asignación de tareas."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Fencing de Leases (lease_id)",
+      "items": [
+        "Cada lease genera un token UUID monótono nuevo.",
+        "Cualquier intento de renovación o resolución con un lease_id previo es rechazado con ErrLeaseLost."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Protección Poison-Pill",
+      "items": [
+        "Tareas que crashean repetidamente (>3 reclamos) no bloquean la cola indefinidamente.",
+        "El sistema transiciona automáticamente la tarea a failed y genera un handoff inalterable de autopsia."
+      ]
+    }
+  ]
+}

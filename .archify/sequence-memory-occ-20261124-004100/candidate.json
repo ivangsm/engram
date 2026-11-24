@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Control de Concurrencia Optimista (OCC) & Resolución con Diff 3-Way",
+    "locale": "es",
+    "output": ".archify/sequence-memory-occ-20261124-004100/memory-occ-sequence.html",
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "agent_a",
+      "type": "external",
+      "label": "Agente A",
+      "sublabel": "Worker 1 (Autor exitoso)"
+    },
+    {
+      "id": "agent_b",
+      "type": "external",
+      "label": "Agente B",
+      "sublabel": "Worker 2 (Colisión concurrente)"
+    },
+    {
+      "id": "mcp",
+      "type": "backend",
+      "label": "Servidor MCP",
+      "sublabel": "JSON-RPC Gateway"
+    },
+    {
+      "id": "mem_svc",
+      "type": "backend",
+      "label": "Servicio de Memorias",
+      "sublabel": "Validación OCC & Merkle"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL 18",
+      "sublabel": "memories & revisions"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 310,
+      "label": "1. Escritura Exitosa (Agente A)"
+    },
+    {
+      "from": 320,
+      "to": 510,
+      "label": "2. Detección de Colisión Stale Revision (Agente B)"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "from": "agent_a",
+      "to": "mcp",
+      "y": 165,
+      "label": "store_memory(key, parent_hash=H0)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m2",
+      "from": "mcp",
+      "to": "mem_svc",
+      "y": 190,
+      "label": "Store(input)",
+      "variant": "default"
+    },
+    {
+      "id": "m3",
+      "from": "mem_svc",
+      "to": "db",
+      "y": 215,
+      "label": "RecallMemory(key)",
+      "variant": "default"
+    },
+    {
+      "id": "m4",
+      "from": "db",
+      "to": "mem_svc",
+      "y": 240,
+      "label": "HEAD rev=1, hash=H0 (coincide)",
+      "variant": "return"
+    },
+    {
+      "id": "m5",
+      "from": "mem_svc",
+      "to": "db",
+      "y": 265,
+      "label": "INSERT rev=2 (hash=H1, parent=H0)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m6",
+      "from": "mem_svc",
+      "to": "mcp",
+      "y": 285,
+      "label": "StoreResult(rev=2, hash=H1)",
+      "variant": "return"
+    },
+    {
+      "id": "m7",
+      "from": "mcp",
+      "to": "agent_a",
+      "y": 305,
+      "label": "200 OK (rev 2 persistida)",
+      "variant": "return"
+    },
+    {
+      "id": "m8",
+      "from": "agent_b",
+      "to": "mcp",
+      "y": 335,
+      "label": "store_memory(key, parent_hash=H0)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m9",
+      "from": "mcp",
+      "to": "mem_svc",
+      "y": 360,
+      "label": "Store(input)",
+      "variant": "default"
+    },
+    {
+      "id": "m10",
+      "from": "mem_svc",
+      "to": "db",
+      "y": 385,
+      "label": "RecallMemory(key)",
+      "variant": "default"
+    },
+    {
+      "id": "m11",
+      "from": "db",
+      "to": "mem_svc",
+      "y": 410,
+      "label": "HEAD rev=2, hash=H1 (!= H0)",
+      "variant": "return"
+    },
+    {
+      "id": "m12",
+      "from": "mem_svc",
+      "to": "mem_svc",
+      "y": 435,
+      "label": "GenerateUnifiedDiff(HEAD_H1, input_B)",
+      "variant": "security"
+    },
+    {
+      "id": "m13",
+      "from": "mem_svc",
+      "to": "mcp",
+      "y": 460,
+      "label": "err: *StaleRevisionError + diff",
+      "variant": "security"
+    },
+    {
+      "id": "m14",
+      "from": "mcp",
+      "to": "agent_b",
+      "y": 490,
+      "label": "409 Conflict (diff unificado para reconciliación)",
+      "variant": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "OCC Sin Bloqueos Pesados",
+      "items": [
+        "El agente especifica expected_parent_hash en cada edición.",
+        "Si otro agente escribió primero, la transacción detecta el cambio de HEAD inmediatamente."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Diff Unificado en Error",
+      "items": [
+        "En lugar de un simple rechazo, Engram genera un diff unificado tripartito en tiempo real.",
+        "Permite que el agente en conflicto haga merge semántico en memoria y reintente limpiamente."
+      ]
+    }
+  ]
+}

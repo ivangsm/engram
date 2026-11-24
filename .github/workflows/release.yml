@@ -1,0 +1,112 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-artifacts:
+    name: Build & Package Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            archive_ext: zip
+            binary_ext: .exe
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Compile Standalone Binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
+          DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          LDFLAGS="-s -w -X main.version=${TAG_NAME} -X main.commit=${COMMIT} -X main.date=${DATE}"
+          
+          OUTPUT_DIR="dist/engram_${TAG_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "${OUTPUT_DIR}"
+          
+          go build -trimpath -ldflags="${LDFLAGS}" -o "${OUTPUT_DIR}/engram${{ matrix.binary_ext }}" ./cmd/engram
+          go build -trimpath -ldflags="${LDFLAGS}" -o "${OUTPUT_DIR}/engramd${{ matrix.binary_ext }}" ./cmd/engramd
+          
+          # Include database migrations & documentation in distribution
+          cp -r migrations "${OUTPUT_DIR}/"
+          cp README.md "${OUTPUT_DIR}/"
+
+      - name: Package Archives
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          TARGET="engram_${TAG_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          cd dist
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            zip -r "${TARGET}.zip" "${TARGET}"
+          else
+            tar -czvf "${TARGET}.tar.gz" "${TARGET}"
+          fi
+          cd ..
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engram-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.${{ matrix.archive_ext }}
+          retention-days: 1
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: build-release-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Built Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate Checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

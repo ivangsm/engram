@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "diagram_type": "erd",
+  "meta": {
+    "title": "Modelo de Datos Canónico de Engram (PostgreSQL 18 + pgvector)",
+    "locale": "es",
+    "output": ".archify/erd-engram-schema-20261124-004100/engram-schema.html",
+    "quality_profile": "standard"
+  },
+  "layout": {
+    "mode": "grid",
+    "gapY": 48,
+    "gapX": 96
+  },
+  "entities": [
+    {
+      "id": "projects",
+      "label": "projects",
+      "tag": "namespaces",
+      "row": 0,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "varchar(64)",
+          "key": "pk"
+        },
+        {
+          "name": "name",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz"
+        }
+      ]
+    },
+    {
+      "id": "engram_events",
+      "label": "engram_events",
+      "tag": "namespaces",
+      "row": 1,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "bigserial",
+          "key": "pk"
+        },
+        {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "key": "fk",
+          "references": "projects.id"
+        },
+        {
+          "name": "topic",
+          "type": "varchar(64)"
+        },
+        {
+          "name": "payload",
+          "type": "jsonb"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        }
+      ]
+    },
+    {
+      "id": "agent_memories",
+      "label": "agent_memories",
+      "tag": "memories",
+      "row": 0,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "key": "pk"
+        },
+        {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "key": "fk",
+          "references": "projects.id"
+        },
+        {
+          "name": "key",
+          "type": "varchar(255)"
+        },
+        {
+          "name": "scope",
+          "type": "varchar(64)"
+        },
+        {
+          "name": "digest",
+          "type": "text"
+        },
+        {
+          "name": "content",
+          "type": "text"
+        },
+        {
+          "name": "token_count",
+          "type": "int"
+        },
+        {
+          "name": "embedding",
+          "type": "vector(1536)"
+        },
+        {
+          "name": "tsv",
+          "type": "tsvector"
+        },
+        {
+          "name": "latest_revision_id",
+          "type": "uuid",
+          "key": "fk",
+          "references": "engram_revisions.id"
+        },
+        {
+          "name": "superseded_by",
+          "type": "uuid",
+          "key": "fk",
+          "references": "agent_memories.id"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz"
+        }
+      ]
+    },
+    {
+      "id": "engram_revisions",
+      "label": "engram_revisions",
+      "tag": "memories",
+      "row": 1,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "key": "pk"
+        },
+        {
+          "name": "memory_id",
+          "type": "uuid",
+          "key": "fk",
+          "references": "agent_memories.id"
+        },
+        {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "key": "fk",
+          "references": "projects.id"
+        },
+        {
+          "name": "revision_number",
+          "type": "int"
+        },
+        {
+          "name": "author_user",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "author_agent_model",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "machine_id",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "task_id",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "rationale",
+          "type": "text"
+        },
+        {
+          "name": "content_hash",
+          "type": "varchar(64)"
+        },
+        {
+          "name": "parent_hash",
+          "type": "varchar(64)"
+        },
+        {
+          "name": "patch_diff",
+          "type": "text"
+        },
+        {
+          "name": "content",
+          "type": "text"
+        },
+        {
+          "name": "digest",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        }
+      ]
+    },
+    {
+      "id": "agent_tasks",
+      "label": "agent_tasks",
+      "tag": "state",
+      "row": 0,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "key": [
+            "pk",
+            "fk"
+          ],
+          "references": "projects.id"
+        },
+        {
+          "name": "id",
+          "type": "varchar(128)",
+          "key": "pk"
+        },
+        {
+          "name": "title",
+          "type": "varchar(255)"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "status",
+          "type": "varchar(32)"
+        },
+        {
+          "name": "priority",
+          "type": "int"
+        },
+        {
+          "name": "leased_by",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "lease_id",
+          "type": "uuid"
+        },
+        {
+          "name": "lease_expires_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "claimed_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "claim_count",
+          "type": "int"
+        },
+        {
+          "name": "max_retries",
+          "type": "int"
+        },
+        {
+          "name": "completed_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamptz"
+        }
+      ]
+    },
+    {
+      "id": "agent_handoffs",
+      "label": "agent_handoffs",
+      "tag": "state",
+      "row": 1,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "key": "pk"
+        },
+        {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "key": "fk",
+          "references": "projects.id"
+        },
+        {
+          "name": "task_id",
+          "type": "varchar(128)",
+          "key": "fk",
+          "references": "agent_tasks.id"
+        },
+        {
+          "name": "from_agent",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "to_agent",
+          "type": "varchar(128)"
+        },
+        {
+          "name": "verdict",
+          "type": "varchar(64)"
+        },
+        {
+          "name": "summary",
+          "type": "text"
+        },
+        {
+          "name": "reproducible_evidence",
+          "type": "text"
+        },
+        {
+          "name": "artifacts",
+          "type": "jsonb"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "rel-proj-mem",
+      "from": "projects",
+      "to": "agent_memories",
+      "fromCardinality": "one",
+      "toCardinality": "many",
+      "fromOptional": false,
+      "toOptional": true
+    },
+    {
+      "id": "rel-proj-events",
+      "from": "projects",
+      "to": "engram_events",
+      "fromCardinality": "one",
+      "toCardinality": "many",
+      "fromOptional": false,
+      "toOptional": true
+    },
+    {
+      "id": "rel-mem-revs",
+      "from": "agent_memories",
+      "to": "engram_revisions",
+      "fromCardinality": "one",
+      "toCardinality": "many",
+      "fromOptional": false,
+      "toOptional": false
+    },
+    {
+      "id": "rel-proj-tasks",
+      "from": "projects",
+      "to": "agent_tasks",
+      "fromCardinality": "one",
+      "toCardinality": "many",
+      "fromOptional": false,
+      "toOptional": true
+    },
+    {
+      "id": "rel-task-handoffs",
+      "from": "agent_tasks",
+      "to": "agent_handoffs",
+      "fromCardinality": "one",
+      "toCardinality": "many",
+      "fromOptional": false,
+      "toOptional": true
+    }
+  ]
+}

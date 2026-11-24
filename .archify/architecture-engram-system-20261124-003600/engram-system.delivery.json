@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "e3050e7b-78a7-4064-8e3e-aa8bf60d1550",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/ivan/Documents/engram/.archify/architecture-engram-system-20261124-003600/candidate.json",
+  "output": "/Users/ivan/Documents/engram/.archify/architecture-engram-system-20261124-003600/engram-system.html",
+  "specification": {
+    "sha256": "ec80165858f5a539c7e81cbfdee5704781066960388c3a8f94eb0f6743102ac8",
+    "bytes": 6652
+  },
+  "artifact": {
+    "sha256": "5a2eff904af5ed70c19388854fcf73636e98776db9120c73aaf2bb73868d501c",
+    "bytes": 954035
+  }
+}

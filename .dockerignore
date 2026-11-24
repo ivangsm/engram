@@ -1,0 +1,13 @@
+.git
+.github
+.serena
+.DS_Store
+bin/
+dist/
+*.tmp
+*.log
+*.md
+!migrations/*.sql
+docs/
+coverage.txt
+docker-compose*.yml

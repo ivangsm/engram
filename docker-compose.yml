@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: engram-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ENGRAM_DB_NAME:-engram}
+      POSTGRES_USER: ${ENGRAM_DB_USER:-engram}
+      POSTGRES_PASSWORD: ${ENGRAM_DB_PASSWORD:-engram_dev_secret}
+    ports:
+      - "${ENGRAM_DB_PORT:-5433}:5432"
+    volumes:
+      - engram_pgdata:/var/lib/postgresql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ENGRAM_DB_USER:-engram} -d ${ENGRAM_DB_NAME:-engram}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  engramd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/ivan/engram:latest
+    container_name: engram-daemon
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENGRAM_PORT: "8085"
+      ENGRAM_DB_HOST: "postgres"
+      ENGRAM_DB_PORT: "5432"
+      ENGRAM_DB_USER: ${ENGRAM_DB_USER:-engram}
+      ENGRAM_DB_PASSWORD: ${ENGRAM_DB_PASSWORD:-engram_dev_secret}
+      ENGRAM_DB_NAME: ${ENGRAM_DB_NAME:-engram}
+      ENGRAM_DB_SSLMODE: "disable"
+      ENGRAM_AUTH_TOKEN: ${ENGRAM_AUTH_TOKEN:-engram_dev_token_2026}
+      ENGRAM_MIGRATIONS_DIR: "/app/migrations"
+    ports:
+      - "${ENGRAM_PORT:-8085}:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8085/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  engram_pgdata:
