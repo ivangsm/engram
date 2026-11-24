@@ -144,6 +144,7 @@ func (s *Service) CreateTask(ctx context.Context, projectID, id, title, descript
 		ID:          projectID,
 		Name:        projectID,
 		Description: "Auto-created project namespace",
+		Settings:    []byte("{}"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to ensure project exists: %w", err)

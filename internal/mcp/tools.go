@@ -10,18 +10,6 @@ import (
 	"github.com/ivan/engram/internal/core/state"
 )
 
-type Registry struct {
-	memoriesSvc *memories.Service
-	stateSvc    *state.Service
-}
-
-func NewRegistry(m *memories.Service, s *state.Service) *Registry {
-	return &Registry{
-		memoriesSvc: m,
-		stateSvc:    s,
-	}
-}
-
 func (r *Registry) ListTools() []Tool {
 	return []Tool{
 		{
@@ -181,6 +169,52 @@ func (r *Registry) ListTools() []Tool {
 					"reason":     {Type: "string", Description: "Reason or error causing failure"},
 				},
 				Required: []string{"project_id", "task_id"},
+			},
+		},
+		{
+			Name:        "list_projects",
+			Description: "Returns active projects with their configuration settings and timestamps.",
+			InputSchema: ToolSchema{
+				Type:       "object",
+				Properties: map[string]PropertyDef{},
+			},
+		},
+		{
+			Name:        "get_project",
+			Description: "Returns detailed project metadata, configuration settings, and timestamps.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"project_id": {Type: "string", Description: "Unique project identifier (e.g., 'engram', 'birdple-v2')"},
+				},
+				Required: []string{"project_id"},
+			},
+		},
+		{
+			Name:        "create_project",
+			Description: "Idempotently creates or updates a project namespace with settings.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"project_id":  {Type: "string", Description: "Unique project identifier (e.g., 'engram', 'birdple-v2')"},
+					"name":        {Type: "string", Description: "Human-readable display name for the project"},
+					"description": {Type: "string", Description: "Optional description of the project"},
+					"settings":    {Type: "object", Description: "Optional JSON settings object (topology, documentation root, etc.)"},
+				},
+				Required: []string{"project_id"},
+			},
+		},
+		{
+			Name:        "delete_project",
+			Description: "Protected project deletion requiring literal confirmation of the project ID. Supports soft-delete or hard purge.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"project_id":         {Type: "string", Description: "Project ID to delete"},
+					"confirm_project_id": {Type: "string", Description: "Must literally match project_id to confirm deletion"},
+					"purge":              {Type: "boolean", Description: "Optional. If true, hard deletes (purges) the project; otherwise soft-deletes (default: false)"},
+				},
+				Required: []string{"project_id", "confirm_project_id"},
 			},
 		},
 	}
@@ -448,6 +482,73 @@ func (r *Registry) ExecuteTool(ctx context.Context, name string, args json.RawMe
 		}
 		data, _ := json.MarshalIndent(t, "", "  ")
 		return textResult(string(data)), nil
+
+	case "list_projects":
+		if r.projectsSvc == nil {
+			return errorResult("projects service not configured"), nil
+		}
+		projs, err := r.projectsSvc.ListProjects(ctx)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(projs, "", "  ")
+		return textResult(string(data)), nil
+
+	case "get_project":
+		if r.projectsSvc == nil {
+			return errorResult("projects service not configured"), nil
+		}
+		var in struct {
+			ProjectID string `json:"project_id"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+		proj, err := r.projectsSvc.GetProject(ctx, in.ProjectID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(proj, "", "  ")
+		return textResult(string(data)), nil
+
+	case "create_project":
+		if r.projectsSvc == nil {
+			return errorResult("projects service not configured"), nil
+		}
+		var in struct {
+			ProjectID   string          `json:"project_id"`
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Settings    json.RawMessage `json:"settings"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+		proj, err := r.projectsSvc.CreateProject(ctx, in.ProjectID, in.Name, in.Description, in.Settings)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(proj, "", "  ")
+		return textResult(string(data)), nil
+
+	case "delete_project":
+		if r.projectsSvc == nil {
+			return errorResult("projects service not configured"), nil
+		}
+		var in struct {
+			ProjectID        string `json:"project_id"`
+			ConfirmProjectID string `json:"confirm_project_id"`
+			Purge            bool   `json:"purge"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+		err := r.projectsSvc.DeleteProject(ctx, in.ProjectID, in.ConfirmProjectID, in.Purge)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		msg := fmt.Sprintf("Project '%s' deleted successfully (purge=%v)", in.ProjectID, in.Purge)
+		return textResult(msg), nil
 
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil

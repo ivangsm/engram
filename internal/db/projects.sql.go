@@ -10,23 +10,34 @@ import (
 )
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (id, name, description)
-VALUES ($1, $2, $3)
+INSERT INTO projects (id, name, description, settings)
+VALUES ($1, $2, $3, COALESCE($4::jsonb, '{}'::jsonb))
 ON CONFLICT (id) DO UPDATE
-SET name = EXCLUDED.name,
-    description = EXCLUDED.description,
+SET name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE projects.name END,
+    description = CASE WHEN EXCLUDED.description <> '' THEN EXCLUDED.description ELSE projects.description END,
+    settings = CASE 
+        WHEN EXCLUDED.settings IS NOT NULL AND EXCLUDED.settings <> '{}'::jsonb THEN EXCLUDED.settings 
+        ELSE projects.settings 
+    END,
+    deleted_at = NULL,
     updated_at = now()
-RETURNING id, name, description, created_at, updated_at
+RETURNING id, name, description, created_at, updated_at, settings, deleted_at
 `
 
 type CreateProjectParams struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Settings    []byte `json:"settings"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
-	row := q.db.QueryRow(ctx, createProject, arg.ID, arg.Name, arg.Description)
+	row := q.db.QueryRow(ctx, createProject,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.Settings,
+	)
 	var i Project
 	err := row.Scan(
 		&i.ID,
@@ -34,23 +45,16 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Settings,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
-const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM projects
-WHERE id = $1
-`
-
-func (q *Queries) DeleteProject(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, deleteProject, id)
-	return err
-}
-
 const getProject = `-- name: GetProject :one
-SELECT id, name, description, created_at, updated_at FROM projects
-WHERE id = $1 LIMIT 1
+SELECT id, name, description, created_at, updated_at, settings, deleted_at FROM projects
+WHERE id = $1 AND deleted_at IS NULL
+LIMIT 1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
@@ -62,12 +66,15 @@ func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Settings,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, description, created_at, updated_at FROM projects
+SELECT id, name, description, created_at, updated_at, settings, deleted_at FROM projects
+WHERE deleted_at IS NULL
 ORDER BY created_at DESC
 `
 
@@ -86,6 +93,8 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Settings,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -95,4 +104,63 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeProject = `-- name: PurgeProject :exec
+DELETE FROM projects
+WHERE id = $1
+`
+
+func (q *Queries) PurgeProject(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, purgeProject, id)
+	return err
+}
+
+const softDeleteProject = `-- name: SoftDeleteProject :exec
+UPDATE projects
+SET deleted_at = now(),
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteProject(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, softDeleteProject, id)
+	return err
+}
+
+const updateProjectSettings = `-- name: UpdateProjectSettings :one
+UPDATE projects
+SET name = $2,
+    description = $3,
+    settings = $4,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, name, description, created_at, updated_at, settings, deleted_at
+`
+
+type UpdateProjectSettingsParams struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Settings    []byte `json:"settings"`
+}
+
+func (q *Queries) UpdateProjectSettings(ctx context.Context, arg UpdateProjectSettingsParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProjectSettings,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.Settings,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Settings,
+		&i.DeletedAt,
+	)
+	return i, err
 }

@@ -52,8 +52,9 @@ COPY --from=builder /out/engramd /usr/local/bin/engramd
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Embed database schema migrations for auto-migration
+# Embed database schema migrations and Antigravity plugin (includes bundled skill)
 COPY migrations /app/migrations
+COPY plugins /app/plugins
 
 # Secure directory ownership
 RUN chown -R engram:engram /app

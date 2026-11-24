@@ -19,6 +19,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/ivan/engram/internal/core/memories"
+	"github.com/ivan/engram/internal/core/projects"
 	"github.com/ivan/engram/internal/core/state"
 	"github.com/ivan/engram/internal/mcp"
 	"github.com/ivan/engram/internal/platform/auth"
@@ -86,13 +87,15 @@ func main() {
 	// 2. Initialize Core Services
 	var memSvc *memories.Service
 	var stateSvc *state.Service
+	var projSvc *projects.Service
 	var mcpServer *mcp.Server
 	var outboxListener *platformdb.OutboxListener
 
 	if pool != nil {
 		memSvc = memories.NewService(pool)
 		stateSvc = state.NewService(pool)
-		mcpRegistry := mcp.NewRegistry(memSvc, stateSvc)
+		projSvc = projects.NewService(pool)
+		mcpRegistry := mcp.NewRegistry(memSvc, stateSvc, projSvc)
 		mcpServer = mcp.NewServer(mcpRegistry)
 
 		dbCfg := platformdb.Config{

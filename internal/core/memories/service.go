@@ -193,6 +193,7 @@ func (s *Service) Store(ctx context.Context, in StoreInput) (*StoreResult, error
 		ID:          in.ProjectID,
 		Name:        in.ProjectID,
 		Description: "Auto-created project namespace",
+		Settings:    []byte("{}"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to ensure project exists: %w", err)
