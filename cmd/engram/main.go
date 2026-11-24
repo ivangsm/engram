@@ -508,9 +508,7 @@ func detectTopology(rootDir, flagDocs, flagTodo string) DocsConfig {
 		}
 
 		var sources []string
-		for _, mf := range markdownFiles {
-			sources = append(sources, mf)
-		}
+		sources = append(sources, markdownFiles...)
 		if dirExists(serenaMemoriesPath) {
 			sources = append(sources, ".serena/memories")
 		} else if dirExists(serenaPath) {
@@ -683,7 +681,7 @@ func runProjectList(serverURL, token string, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 3, ' ', 0)
-	fmt.Fprintln(w, "PROJECT ID\tNAME\tDOCS ROOT\tUPDATED AT")
+	_, _ = fmt.Fprintln(w, "PROJECT ID\tNAME\tDOCS ROOT\tUPDATED AT")
 	for _, p := range projs {
 		docsRoot := "-"
 		var s struct {
@@ -694,7 +692,7 @@ func runProjectList(serverURL, token string, args []string) {
 		if len(p.Settings) > 0 && json.Unmarshal(p.Settings, &s) == nil && s.Docs.Root != "" {
 			docsRoot = s.Docs.Root
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			p.ID,
 			p.Name,
 			docsRoot,
