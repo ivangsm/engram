@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/ivan/Documents/engram/.archify/sequence-memory-occ-20261124-004100/candidate.json",
+    "sha256": "da22f59e5922ee1a1f1b813c9aa5ecae39df73848f42199c766a1771a3687f93",
+    "bytes": 4451
+  },
+  "artifact": {
+    "path": "/Users/ivan/Documents/engram/.archify/sequence-memory-occ-20261124-004100/memory-occ-sequence.html",
+    "sha256": "a3e06f6c8121961c213352db0ab0a676e0ff8ad562b52a22ef4a10e9b896760c",
+    "bytes": 930283
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/ivan/Documents/engram/.archify/sequence-memory-occ-20261124-004100/memory-occ-sequence.finalize.json",
+    "summaryReceipt": "/Users/ivan/Documents/engram/.archify/sequence-memory-occ-20261124-004100/memory-occ-sequence.finalize-summary.json",
+    "browserCheckReceipt": "/Users/ivan/Documents/engram/.archify/sequence-memory-occ-20261124-004100/memory-occ-sequence.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.3.0",
+    "availableVersion": "3.3.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-24T06:35:01.411Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2376,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

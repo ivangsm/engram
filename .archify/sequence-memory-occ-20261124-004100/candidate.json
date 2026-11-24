@@ -13,13 +13,13 @@
       "id": "agent_a",
       "type": "external",
       "label": "Agente A",
-      "sublabel": "Worker 1 (Autor exitoso)"
+      "sublabel": "Worker 1"
     },
     {
       "id": "agent_b",
       "type": "external",
       "label": "Agente B",
-      "sublabel": "Worker 2 (Colisión concurrente)"
+      "sublabel": "Worker 2 (Colisión)"
     },
     {
       "id": "mcp",
@@ -30,8 +30,8 @@
     {
       "id": "mem_svc",
       "type": "backend",
-      "label": "Servicio de Memorias",
-      "sublabel": "Validación OCC & Merkle"
+      "label": "Memories Service",
+      "sublabel": "OCC Engine"
     },
     {
       "id": "db",
@@ -43,12 +43,12 @@
   "segments": [
     {
       "from": 150,
-      "to": 310,
-      "label": "1. Escritura Exitosa (Agente A)"
+      "to": 355,
+      "label": "1. Mutación Exitosa (Agente A)"
     },
     {
-      "from": 320,
-      "to": 510,
+      "from": 365,
+      "to": 580,
       "label": "2. Detección de Colisión Stale Revision (Agente B)"
     }
   ],
@@ -65,7 +65,7 @@
       "id": "m2",
       "from": "mcp",
       "to": "mem_svc",
-      "y": 190,
+      "y": 200,
       "label": "Store(input)",
       "variant": "default"
     },
@@ -73,7 +73,7 @@
       "id": "m3",
       "from": "mem_svc",
       "to": "db",
-      "y": 215,
+      "y": 235,
       "label": "RecallMemory(key)",
       "variant": "default"
     },
@@ -81,7 +81,7 @@
       "id": "m4",
       "from": "db",
       "to": "mem_svc",
-      "y": 240,
+      "y": 270,
       "label": "HEAD rev=1, hash=H0 (coincide)",
       "variant": "return"
     },
@@ -89,81 +89,96 @@
       "id": "m5",
       "from": "mem_svc",
       "to": "db",
-      "y": 265,
+      "y": 305,
       "label": "INSERT rev=2 (hash=H1, parent=H0)",
       "variant": "emphasis"
     },
     {
       "id": "m6",
       "from": "mem_svc",
-      "to": "mcp",
-      "y": 285,
-      "label": "StoreResult(rev=2, hash=H1)",
-      "variant": "return"
-    },
-    {
-      "id": "m7",
-      "from": "mcp",
       "to": "agent_a",
-      "y": 305,
+      "y": 340,
       "label": "200 OK (rev 2 persistida)",
       "variant": "return"
     },
     {
-      "id": "m8",
+      "id": "m7",
       "from": "agent_b",
       "to": "mcp",
-      "y": 335,
+      "y": 375,
       "label": "store_memory(key, parent_hash=H0)",
       "variant": "emphasis"
     },
     {
-      "id": "m9",
+      "id": "m8",
       "from": "mcp",
       "to": "mem_svc",
-      "y": 360,
+      "y": 410,
       "label": "Store(input)",
       "variant": "default"
     },
     {
-      "id": "m10",
+      "id": "m9",
       "from": "mem_svc",
       "to": "db",
-      "y": 385,
+      "y": 445,
       "label": "RecallMemory(key)",
       "variant": "default"
     },
     {
-      "id": "m11",
+      "id": "m10",
       "from": "db",
       "to": "mem_svc",
-      "y": 410,
+      "y": 480,
       "label": "HEAD rev=2, hash=H1 (!= H0)",
       "variant": "return"
     },
     {
-      "id": "m12",
+      "id": "m11",
       "from": "mem_svc",
-      "to": "mem_svc",
-      "y": 435,
-      "label": "GenerateUnifiedDiff(HEAD_H1, input_B)",
-      "variant": "security"
-    },
-    {
-      "id": "m13",
-      "from": "mem_svc",
-      "to": "mcp",
-      "y": 460,
-      "label": "err: *StaleRevisionError + diff",
-      "variant": "security"
-    },
-    {
-      "id": "m14",
-      "from": "mcp",
       "to": "agent_b",
-      "y": 490,
-      "label": "409 Conflict (diff unificado para reconciliación)",
-      "variant": "return"
+      "y": 525,
+      "label": "409 Conflict (*StaleRevisionError)",
+      "variant": "security",
+      "note": "Calcula diff unificado tripartito entre HEAD y payload entrante para reconciliación en memoria"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "mcp",
+      "from": 165,
+      "to": 340,
+      "type": "backend"
+    },
+    {
+      "participant": "mem_svc",
+      "from": 200,
+      "to": 340,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 235,
+      "to": 305,
+      "type": "database"
+    },
+    {
+      "participant": "mcp",
+      "from": 375,
+      "to": 525,
+      "type": "backend"
+    },
+    {
+      "participant": "mem_svc",
+      "from": 410,
+      "to": 525,
+      "type": "backend"
+    },
+    {
+      "participant": "db",
+      "from": 445,
+      "to": 480,
+      "type": "database"
     }
   ],
   "cards": [
@@ -171,16 +186,16 @@
       "dot": "cyan",
       "title": "OCC Sin Bloqueos Pesados",
       "items": [
-        "El agente especifica expected_parent_hash en cada edición.",
-        "Si otro agente escribió primero, la transacción detecta el cambio de HEAD inmediatamente."
+        "El cliente provee expected_parent_hash en cada llamada store_memory.",
+        "Si otro worker escribió antes, la verificación en memoria aborta la mutación antes de corromper el árbol Merkle."
       ]
     },
     {
-      "dot": "emerald",
+      "dot": "rose",
       "title": "Diff Unificado en Error",
       "items": [
-        "En lugar de un simple rechazo, Engram genera un diff unificado tripartito en tiempo real.",
-        "Permite que el agente en conflicto haga merge semántico en memoria y reintente limpiamente."
+        "La excepción *StaleRevisionError emite el hash de HEAD, la revisión actual y un diff unificado tripartito.",
+        "El agente cliente puede realizar un merge semántico de tres vías en su contexto local y reintentar de forma autónoma."
       ]
     }
   ]
