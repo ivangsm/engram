@@ -65,9 +65,9 @@ type InitializeResult struct {
 }
 
 type Tool struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema ToolSchema  `json:"inputSchema"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	InputSchema ToolSchema `json:"inputSchema"`
 }
 
 type ToolSchema struct {

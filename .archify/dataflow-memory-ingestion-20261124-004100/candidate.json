@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Pipeline de Ingesta, Indexación Semántica & Outbox de Memorias",
+    "locale": "es",
+    "output": ".archify/dataflow-memory-ingestion-20261124-004100/memory-ingestion-dataflow.html",
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    {
+      "label": "1. Entrada"
+    },
+    {
+      "label": "2. Validación"
+    },
+    {
+      "label": "3. Transformación"
+    },
+    {
+      "label": "4. Persistencia"
+    },
+    {
+      "label": "5. Consumo"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "agent_input",
+      "type": "external",
+      "label": "Agente / CLI",
+      "sublabel": "store_memory",
+      "stage": 0,
+      "row": 0,
+      "tag": "markdown"
+    },
+    {
+      "id": "parent_head",
+      "type": "database",
+      "label": "HEAD Previsto",
+      "sublabel": "parent_hash",
+      "stage": 0,
+      "row": 1,
+      "tag": "OCC token"
+    },
+    {
+      "id": "occ_check",
+      "type": "security",
+      "label": "Validador OCC",
+      "sublabel": "compara HEAD",
+      "stage": 1,
+      "row": 0,
+      "tag": "3-way diff"
+    },
+    {
+      "id": "token_est",
+      "type": "backend",
+      "label": "Estimador Tokens",
+      "sublabel": "len(s) / 3.7",
+      "stage": 1,
+      "row": 1,
+      "tag": "metadata"
+    },
+    {
+      "id": "sha_hasher",
+      "type": "backend",
+      "label": "Hasher SHA-256",
+      "sublabel": "hash criptográfico",
+      "stage": 2,
+      "row": 0,
+      "tag": "Merkle"
+    },
+    {
+      "id": "vectorizer",
+      "type": "backend",
+      "label": "Vectorizador",
+      "sublabel": "1536d + tsvector",
+      "stage": 2,
+      "row": 1,
+      "tag": "pgvector"
+    },
+    {
+      "id": "mem_table",
+      "type": "database",
+      "label": "agent_memories",
+      "sublabel": "tabla canónica",
+      "stage": 3,
+      "row": 0,
+      "tag": "upsert"
+    },
+    {
+      "id": "rev_ledger",
+      "type": "database",
+      "label": "engram_revisions",
+      "sublabel": "historial audit",
+      "stage": 3,
+      "row": 1,
+      "tag": "append-only"
+    },
+    {
+      "id": "outbox_tab",
+      "type": "messagebus",
+      "label": "engram_events",
+      "sublabel": "outbox atómico",
+      "stage": 3,
+      "row": 2,
+      "tag": "misma TX"
+    },
+    {
+      "id": "search_svc",
+      "type": "backend",
+      "label": "Búsqueda Híbrida",
+      "sublabel": "cosine + ts_rank",
+      "stage": 4,
+      "row": 0,
+      "tag": "search_memory"
+    },
+    {
+      "id": "manifest_svc",
+      "type": "backend",
+      "label": "Manifiestos",
+      "sublabel": "divulgación progresiva",
+      "stage": 4,
+      "row": 1,
+      "tag": "cero dump"
+    },
+    {
+      "id": "sse_push",
+      "type": "messagebus",
+      "label": "Stream SSE",
+      "sublabel": "fanning push",
+      "stage": 4,
+      "row": 2,
+      "tag": "LISTEN"
+    }
+  ],
+  "flows": [
+    {
+      "id": "f1",
+      "from": "agent_input",
+      "to": "occ_check",
+      "label": "payload entrante",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f2",
+      "from": "parent_head",
+      "to": "occ_check",
+      "label": "HEAD actual",
+      "variant": "default"
+    },
+    {
+      "id": "f3",
+      "from": "occ_check",
+      "to": "sha_hasher",
+      "label": "texto aceptado",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f4",
+      "from": "occ_check",
+      "to": "token_est",
+      "label": "recuento chars",
+      "variant": "default"
+    },
+    {
+      "id": "f5",
+      "from": "sha_hasher",
+      "to": "vectorizer",
+      "label": "texto normalizado",
+      "variant": "default"
+    },
+    {
+      "id": "f6",
+      "from": "sha_hasher",
+      "to": "mem_table",
+      "label": "digest + token_count",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f7",
+      "from": "sha_hasher",
+      "to": "rev_ledger",
+      "label": "SHA256 + diff unificado",
+      "variant": "security"
+    },
+    {
+      "id": "f8",
+      "from": "vectorizer",
+      "to": "mem_table",
+      "label": "vector(1536) + tsv",
+      "variant": "default"
+    },
+    {
+      "id": "f9",
+      "from": "sha_hasher",
+      "to": "outbox_tab",
+      "label": "evento en misma TX",
+      "variant": "dashed"
+    },
+    {
+      "id": "f10",
+      "from": "mem_table",
+      "to": "search_svc",
+      "label": "HNSW cosine scan",
+      "variant": "default"
+    },
+    {
+      "id": "f11",
+      "from": "mem_table",
+      "to": "manifest_svc",
+      "label": "skeletal digests",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f12",
+      "from": "outbox_tab",
+      "to": "sse_push",
+      "label": "pg_notify trigger",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Pipeline Criptográfico",
+      "items": [
+        "El contenido validado se hashea con SHA-256 vinculándolo estrictamente a su hash padre (parent_hash).",
+        "Genera un árbol Merkle auditable que detecta cualquier manipulación o bifurcación no coordinada."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Indexación Híbrida",
+      "items": [
+        "Simultáneamente genera embeddings de 1536 dimensiones para similitud semántica y tsvector para búsqueda léxica.",
+        "Permite búsquedas ponderadas combinando cosine distance con ranking de frecuencias."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Disparador de Eventos",
+      "items": [
+        "La inserción en la tabla outbox es parte indivisible de la transacción.",
+        "El trigger de PostgreSQL dispara la notificación push inmediata hacia los agentes conectados."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "4a0d1091-4f55-4e0a-8922-235de8d64e2d",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "/Users/ivan/Documents/engram/.archify/dataflow-memory-ingestion-20261124-004100/candidate.json",
+  "output": "/Users/ivan/Documents/engram/.archify/dataflow-memory-ingestion-20261124-004100/memory-ingestion-dataflow.html",
+  "specification": {
+    "sha256": "a54a0e6ad6a0eb101263a3cc10ff0dd5704f72a1902334abc9c0732319febe69",
+    "bytes": 5619
+  },
+  "artifact": {
+    "sha256": "136f1de892cf3f6683daa65f77d68484934258dd1308eaa977cd3b3f737fd726",
+    "bytes": 941768
+  }
+}

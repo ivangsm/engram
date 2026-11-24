@@ -3,7 +3,8 @@ name: Release Binaries
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,9 +21,6 @@ jobs:
             archive_ext: tar.gz
           - goos: linux
             goarch: arm64
-            archive_ext: tar.gz
-          - goos: darwin
-            goarch: amd64
             archive_ext: tar.gz
           - goos: darwin
             goarch: arm64
@@ -58,7 +56,7 @@ jobs:
           go build -trimpath -ldflags="${LDFLAGS}" -o "${OUTPUT_DIR}/engram${{ matrix.binary_ext }}" ./cmd/engram
           go build -trimpath -ldflags="${LDFLAGS}" -o "${OUTPUT_DIR}/engramd${{ matrix.binary_ext }}" ./cmd/engramd
           
-          # Include database migrations & documentation in distribution
+          # Include database migrations & documentation in release package
           cp -r migrations "${OUTPUT_DIR}/"
           cp README.md "${OUTPUT_DIR}/"
 

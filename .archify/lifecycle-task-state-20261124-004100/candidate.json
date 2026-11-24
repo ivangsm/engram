@@ -1,0 +1,184 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Máquina de Estados & Ciclo de Vida de Tareas Operacionales",
+    "locale": "es",
+    "output": ".archify/lifecycle-task-state-20261124-004100/task-state-lifecycle.html",
+    "animation": "trace",
+    "quality_profile": "showcase"
+  },
+  "mainPath": [
+    "pending",
+    "claimed",
+    "executing",
+    "handoff",
+    "completed"
+  ],
+  "states": [
+    {
+      "id": "pending",
+      "type": "start",
+      "label": "Pending",
+      "sublabel": "en cola de espera",
+      "tag": "cola",
+      "step": "01"
+    },
+    {
+      "id": "claimed",
+      "type": "active",
+      "label": "Claimed",
+      "sublabel": "fenced con lease_id",
+      "tag": "in_progress",
+      "step": "02"
+    },
+    {
+      "id": "executing",
+      "type": "decision",
+      "label": "Executing",
+      "sublabel": "ejecución de agente",
+      "tag": "trabajo",
+      "step": "03"
+    },
+    {
+      "id": "handoff",
+      "type": "waiting",
+      "label": "Handoff Contract",
+      "sublabel": "resumen <150 palabras",
+      "tag": "veredicto",
+      "step": "04"
+    },
+    {
+      "id": "completed",
+      "type": "success",
+      "label": "Completed",
+      "sublabel": "tarea resuelta",
+      "tag": "terminal",
+      "step": "05"
+    },
+    {
+      "id": "renewing",
+      "type": "active",
+      "label": "Lease Renewal",
+      "sublabel": "latido de extensión",
+      "tag": "heartbeat"
+    },
+    {
+      "id": "blocked",
+      "type": "waiting",
+      "label": "Blocked",
+      "sublabel": "espera dependencia",
+      "tag": "pausa"
+    },
+    {
+      "id": "expired",
+      "type": "neutral",
+      "label": "Lease Expired",
+      "sublabel": "reclamable al pool",
+      "tag": "reap"
+    },
+    {
+      "id": "failed",
+      "type": "failure",
+      "label": "Failed (Quarantine)",
+      "sublabel": "claim_count >= 3",
+      "tag": "terminal"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "from": "pending",
+      "to": "claimed",
+      "label": "claim_task (SKIP LOCKED)"
+    },
+    {
+      "id": "t2",
+      "from": "claimed",
+      "to": "executing",
+      "label": "inicia trabajo"
+    },
+    {
+      "id": "t3",
+      "from": "executing",
+      "to": "handoff",
+      "label": "record_handoff"
+    },
+    {
+      "id": "t4",
+      "from": "handoff",
+      "to": "completed",
+      "label": "complete_task"
+    },
+    {
+      "id": "t5",
+      "from": "claimed",
+      "to": "renewing",
+      "label": "renew_task_lease"
+    },
+    {
+      "id": "t6",
+      "from": "renewing",
+      "to": "claimed",
+      "label": "lease renovado"
+    },
+    {
+      "id": "t7",
+      "from": "executing",
+      "to": "blocked",
+      "label": "veredicto BLOCKED",
+      "variant": "dashed"
+    },
+    {
+      "id": "t8",
+      "from": "blocked",
+      "to": "pending",
+      "label": "desbloqueada"
+    },
+    {
+      "id": "t9",
+      "from": "claimed",
+      "to": "expired",
+      "label": "TTL agotado",
+      "variant": "dashed"
+    },
+    {
+      "id": "t10",
+      "from": "expired",
+      "to": "pending",
+      "label": "reap a cola"
+    },
+    {
+      "id": "t11",
+      "from": "executing",
+      "to": "failed",
+      "label": "retries >= 3 (autopsia)",
+      "variant": "security"
+    },
+    {
+      "id": "t12",
+      "from": "handoff",
+      "to": "failed",
+      "label": "veredicto FAIL terminal",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Garantías de Transición",
+      "items": [
+        "El estado claimed es exclusivo y protegido por un token de lease monótono.",
+        "Si un agente se cuelga, el TTL expira y el reaper devuelve la tarea a pending para que otro worker la asuma."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Cuarentena Inmutable",
+      "items": [
+        "Las tareas defectuosas que causan crashes repetidos activan el umbral poison-pill.",
+        "La transición a failed es atómica y escribe una lápida de autopsia inmutable que previene bucles infinitos."
+      ]
+    }
+  ]
+}

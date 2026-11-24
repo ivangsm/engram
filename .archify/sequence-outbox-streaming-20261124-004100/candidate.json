@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Outbox Transaccional & Streaming Real-Time sobre SSE",
+    "locale": "es",
+    "output": ".archify/sequence-outbox-streaming-20261124-004100/outbox-streaming-sequence.html",
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "agent_sub",
+      "type": "external",
+      "label": "Agente Suscriptor",
+      "sublabel": "Cliente SSE"
+    },
+    {
+      "id": "mcp_server",
+      "type": "backend",
+      "label": "Servidor MCP",
+      "sublabel": "handleSSE"
+    },
+    {
+      "id": "agent_writer",
+      "type": "external",
+      "label": "Agente Escritor",
+      "sublabel": "Worker activo"
+    },
+    {
+      "id": "core_svc",
+      "type": "backend",
+      "label": "Servicio Core",
+      "sublabel": "memories / state"
+    },
+    {
+      "id": "pg_tx",
+      "type": "database",
+      "label": "PostgreSQL 18",
+      "sublabel": "engram_events TX"
+    },
+    {
+      "id": "listener",
+      "type": "messagebus",
+      "label": "Outbox Listener",
+      "sublabel": "LISTEN socket"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 265,
+      "label": "1. Handshake SSE & Suscripción"
+    },
+    {
+      "from": 275,
+      "to": 430,
+      "label": "2. Mutación Transaccional en Base de Datos"
+    },
+    {
+      "from": 440,
+      "to": 590,
+      "label": "3. Difusión Real-Time Desacoplada"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "agent_sub",
+      "to": "mcp_server",
+      "y": 165,
+      "label": "GET /sse?project_id=p1",
+      "variant": "emphasis"
+    },
+    {
+      "id": "s2",
+      "from": "mcp_server",
+      "to": "listener",
+      "y": 200,
+      "label": "Subscribe(project_id)",
+      "variant": "default"
+    },
+    {
+      "id": "s3",
+      "from": "listener",
+      "to": "mcp_server",
+      "y": 230,
+      "label": "canal subChan (buffer 32)",
+      "variant": "return"
+    },
+    {
+      "id": "s4",
+      "from": "mcp_server",
+      "to": "agent_sub",
+      "y": 255,
+      "label": "event: endpoint (sessionId=UUID)",
+      "variant": "return"
+    },
+    {
+      "id": "s5",
+      "from": "agent_writer",
+      "to": "core_svc",
+      "y": 290,
+      "label": "store_memory / claim_task",
+      "variant": "emphasis"
+    },
+    {
+      "id": "s6",
+      "from": "core_svc",
+      "to": "pg_tx",
+      "y": 325,
+      "label": "BEGIN TRANSACTION",
+      "variant": "default"
+    },
+    {
+      "id": "s7",
+      "from": "core_svc",
+      "to": "pg_tx",
+      "y": 355,
+      "label": "INSERT agent_memories + INSERT engram_events",
+      "variant": "emphasis"
+    },
+    {
+      "id": "s8",
+      "from": "core_svc",
+      "to": "pg_tx",
+      "y": 385,
+      "label": "COMMIT",
+      "variant": "security"
+    },
+    {
+      "id": "s9",
+      "from": "core_svc",
+      "to": "agent_writer",
+      "y": 415,
+      "label": "200 OK (mutación confirmada)",
+      "variant": "return"
+    },
+    {
+      "id": "s10",
+      "from": "pg_tx",
+      "to": "listener",
+      "y": 455,
+      "label": "pg_notify(engram_events, payload)",
+      "variant": "security"
+    },
+    {
+      "id": "s11",
+      "from": "listener",
+      "to": "mcp_server",
+      "y": 495,
+      "label": "subChan <- jsonPayload",
+      "variant": "emphasis"
+    },
+    {
+      "id": "s12",
+      "from": "mcp_server",
+      "to": "agent_sub",
+      "y": 540,
+      "label": "event: engram_event (data: JSON)",
+      "variant": "security",
+      "note": "Transmisión push en tiempo real hacia todas las sesiones SSE conectadas sin polling"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "mcp_server",
+      "from": 165,
+      "to": 560,
+      "type": "backend"
+    },
+    {
+      "participant": "core_svc",
+      "from": 290,
+      "to": 415,
+      "type": "backend"
+    },
+    {
+      "participant": "pg_tx",
+      "from": 325,
+      "to": 470,
+      "type": "database"
+    },
+    {
+      "participant": "listener",
+      "from": 200,
+      "to": 510,
+      "type": "messagebus"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Atomicidad de Eventos Garantizada",
+      "items": [
+        "El evento de outbox se escribe en la misma transacción ACID de PostgreSQL que la mutación de estado.",
+        "Imposible que ocurra inconsistencia por fallo de red: si la transacción aborta, no se emite ningún evento."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Cero Polling & Socket Dedicado",
+      "items": [
+        "Un único pgx.Conn dedicado ejecuta LISTEN engram_events sin consumir conexiones del pool general.",
+        "Los eventos se difunden sin bloqueo (buffer 32) a través de canales concurrentes en memoria."
+      ]
+    }
+  ]
+}

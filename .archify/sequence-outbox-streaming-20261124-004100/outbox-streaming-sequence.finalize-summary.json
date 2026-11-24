@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/ivan/Documents/engram/.archify/sequence-outbox-streaming-20261124-004100/candidate.json",
+    "sha256": "a8f2ff662785dfc8eab83d2258b3482e3086f1d1003037ef2ba457f75cdc36a8",
+    "bytes": 4760
+  },
+  "artifact": {
+    "path": "/Users/ivan/Documents/engram/.archify/sequence-outbox-streaming-20261124-004100/outbox-streaming-sequence.html",
+    "sha256": "8094c5f9d0e908d9e099833f732a284a86ffd0165a6e8f7e518209b374898caa",
+    "bytes": 933320
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/ivan/Documents/engram/.archify/sequence-outbox-streaming-20261124-004100/outbox-streaming-sequence.finalize.json",
+    "summaryReceipt": "/Users/ivan/Documents/engram/.archify/sequence-outbox-streaming-20261124-004100/outbox-streaming-sequence.finalize-summary.json",
+    "browserCheckReceipt": "/Users/ivan/Documents/engram/.archify/sequence-outbox-streaming-20261124-004100/outbox-streaming-sequence.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.3.0",
+    "availableVersion": "3.3.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-24T06:35:01.411Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2443,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}
