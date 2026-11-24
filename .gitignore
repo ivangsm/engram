@@ -4,3 +4,14 @@ dist/
 *.log
 .DS_Store
 coverage.txt
+
+# Agent environments & local assistant workspaces
+.agents/
+.archify/
+.serena/
+skills-lock.json
+
+# Intermediate design & review reports
+*_report.md
+concepts_brief.md
+docs/
