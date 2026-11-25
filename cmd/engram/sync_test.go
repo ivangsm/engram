@@ -33,16 +33,13 @@ func TestBuildSyncPlan_MixedTopology(t *testing.T) {
 	// 4. EGM directory README + root README
 	writeTestFile(t, filepath.Join(root, "README.md"), "# MyProject\nMain readme.\n")
 	writeTestFile(t, filepath.Join(root, "internal", "core", "README.md"), "# Core Package\nDomain services.\n")
-	// 5. Pendientes (one pending, one completed)
-	writeTestFile(t, filepath.Join(root, "pendientes", "PND-042.md"), "# Fix race condition\nPriority: high\nDetails here.\n")
-	writeTestFile(t, filepath.Join(root, "pendientes", "PND-043.md"), "# Old bug\nStatus: completed\nDone.\n")
-	// 6. TODO.md
+	// 5. Standard TODO.md
 	writeTestFile(t, filepath.Join(root, "TODO.md"), "# Tasks\n- [ ] [TASK-101] Implement sync\n- [ ] Add unit tests\n- [x] Already done\n")
-	// 7. Ignored dir (must not be synced)
+	// 6. Ignored dir (must not be synced)
 	writeTestFile(t, filepath.Join(root, "node_modules", "pkg", "README.md"), "# Ignored\n")
 
 	plan, err := buildSyncPlan(syncOptions{
-		ProjectID: "birdple-v2",
+		ProjectID: "demo-repo",
 		Path:      root,
 	})
 	if err != nil {
@@ -55,11 +52,11 @@ func TestBuildSyncPlan_MixedTopology(t *testing.T) {
 	}
 
 	expectedKeys := map[string]string{
-		"serena/auth-flow":       "serena",
-		"rules/sql-rules":        "rules",
-		"docs/architecture":      "docs",
-		"docs/adr/0001-postgres": "adr",
-		"root/README":            "root",
+		"serena/auth-flow":         "serena",
+		"rules/sql-rules":          "rules",
+		"docs/architecture":        "docs",
+		"docs/adr/0001-postgres":   "adr",
+		"root/README":              "root",
 		"egm/internal/core/README": "egm",
 	}
 	for key, wantScope := range expectedKeys {
@@ -88,19 +85,11 @@ func TestBuildSyncPlan_MixedTopology(t *testing.T) {
 	for _, tk := range plan.Tasks {
 		taskByID[tk.ID] = tk
 	}
-	if tk, ok := taskByID["PND-042"]; !ok {
-		t.Errorf("expected PND-042 in tasks")
-	} else if tk.Priority != 10 {
-		t.Errorf("expected PND-042 priority 10, got %d", tk.Priority)
-	}
-	if _, ok := taskByID["PND-043"]; ok {
-		t.Errorf("completed PND-043 should be skipped by default")
-	}
 	if _, ok := taskByID["TASK-101"]; !ok {
 		t.Errorf("expected TASK-101 from TODO.md")
 	}
-	if len(plan.Tasks) != 3 {
-		t.Errorf("expected 3 pending tasks (PND-042, TASK-101, Add unit tests), got %d", len(plan.Tasks))
+	if len(plan.Tasks) != 2 {
+		t.Errorf("expected 2 pending tasks (TASK-101, Add unit tests), got %d", len(plan.Tasks))
 	}
 }
 
@@ -131,20 +120,51 @@ func TestBuildSyncPlan_SiblingDocsRepo(t *testing.T) {
 	}
 }
 
-func TestSync_IdempotencyAndDryRun(t *testing.T) {
+func TestSync_CuratedPlanAndIdempotency(t *testing.T) {
 	root := t.TempDir()
 	existingContent := "# Existing\nUnchanged content."
 	newContent := "# New\nFresh content."
 
 	writeTestFile(t, filepath.Join(root, "docs", "existing.md"), existingContent+"\n")
 	writeTestFile(t, filepath.Join(root, "docs", "new.md"), newContent+"\n")
-	writeTestFile(t, filepath.Join(root, "pendientes", "PND-1.md"), "# First task\nDo it.\n")
+
+	planPath := filepath.Join(root, "curated-plan.json")
+	planJSON := `{
+  "project_id": "demo",
+  "memories": [
+    {
+      "key": "docs/existing",
+      "scope": "docs",
+      "digest": "Existing doc digest",
+      "file": "docs/existing.md",
+      "rationale": "curated check"
+    },
+    {
+      "key": "docs/new",
+      "scope": "arch",
+      "digest": "New architectural invariant",
+      "file": "docs/new.md",
+      "rationale": "agent curated"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "TASK-1",
+      "title": "Curated active task",
+      "description": "Details",
+      "priority": 10
+    }
+  ],
+  "complete_tasks": ["TASK-2"]
+}`
+	writeTestFile(t, planPath, planJSON)
 
 	existingHash := sha256Hex(existingContent)
 
 	var mu sync.Mutex
 	storedKeys := []string{}
 	createdTasks := []string{}
+	completedTasks := []string{}
 
 	srv, _ := newMockMCPServer(t, func(name string, args map[string]interface{}) (string, bool) {
 		mu.Lock()
@@ -163,6 +183,13 @@ func TestSync_IdempotencyAndDryRun(t *testing.T) {
 		case "create_task":
 			createdTasks = append(createdTasks, args["task_id"].(string))
 			return `{"id":"` + args["task_id"].(string) + `"}`, false
+		case "list_tasks":
+			return `[{"id":"TASK-2","status":"pending"}]`, false
+		case "claim_task":
+			return `{"id":"` + args["task_id"].(string) + `","lease_id":"lease-uuid-123"}`, false
+		case "complete_task":
+			completedTasks = append(completedTasks, args["task_id"].(string))
+			return `{"id":"` + args["task_id"].(string) + `","status":"completed"}`, false
 		default:
 			return `{}`, false
 		}
@@ -171,7 +198,7 @@ func TestSync_IdempotencyAndDryRun(t *testing.T) {
 
 	// Dry run must not hit daemon
 	var dryOut, dryErr bytes.Buffer
-	code := run([]string{"sync", "demo", "--path", root, "--dry-run"}, "http://127.0.0.1:0", "tok", &dryOut, &dryErr)
+	code := run([]string{"sync", "demo", "--path", root, "--plan", planPath, "--dry-run"}, "http://127.0.0.1:0", "tok", &dryOut, &dryErr)
 	if code != 0 {
 		t.Fatalf("dry-run failed (%d): %s", code, dryErr.String())
 	}
@@ -179,9 +206,9 @@ func TestSync_IdempotencyAndDryRun(t *testing.T) {
 		t.Fatalf("unexpected dry-run output:\n%s", dryOut.String())
 	}
 
-	// Real sync: should skip docs/existing, store docs/new, create PND-1
+	// Real sync: skips docs/existing, stores docs/new, creates TASK-1, completes TASK-2
 	var out, errOut bytes.Buffer
-	code = run([]string{"sync", "demo", "--path", root}, srv.URL, "tok", &out, &errOut)
+	code = run([]string{"sync", "demo", "--path", root, "--plan", planPath}, srv.URL, "tok", &out, &errOut)
 	if code != 0 {
 		t.Fatalf("sync failed (%d): %s", code, errOut.String())
 	}
@@ -189,8 +216,11 @@ func TestSync_IdempotencyAndDryRun(t *testing.T) {
 	if len(storedKeys) != 1 || storedKeys[0] != "docs/new" {
 		t.Fatalf("expected only docs/new to be stored, got %v", storedKeys)
 	}
-	if len(createdTasks) != 1 || createdTasks[0] != "PND-1" {
-		t.Fatalf("expected PND-1 to be created, got %v", createdTasks)
+	if len(createdTasks) != 1 || createdTasks[0] != "TASK-1" {
+		t.Fatalf("expected TASK-1 to be created, got %v", createdTasks)
+	}
+	if len(completedTasks) != 1 || completedTasks[0] != "TASK-2" {
+		t.Fatalf("expected TASK-2 to be reconciled as completed, got %v", completedTasks)
 	}
 	if !strings.Contains(out.String(), "Memories unchanged: 1") {
 		t.Fatalf("expected unchanged count 1 in output:\n%s", out.String())

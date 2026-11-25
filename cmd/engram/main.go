@@ -86,8 +86,8 @@ Commands:
   init [--project <id>] [--name <name>] [--docs <dir>] [--todo <file>]
       Auto-detect topology, register project namespace in daemon, and write .engram.json
 
-  sync [project_id] [--path <dir>] [--docs <dir>] [--dry-run] [--only <sources>]
-      Auto-discover and sync docs, Serena memories, EGM READMEs, rules, and tasks (PND-*/TODO.md)
+  sync [project_id] [--path <dir>] [--docs <dir>] [--plan <file>] [--dry-run]
+      Auto-discover and sync docs, Serena memories, EGM READMEs, rules, TODO.md, or a curated --plan JSON
 
   project <ls|get|create|rm> [arguments]
       Manage project namespaces in daemon

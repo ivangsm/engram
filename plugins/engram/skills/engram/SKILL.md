@@ -201,3 +201,18 @@ Engram is accessible via JSON-RPC over HTTP (`POST /mcp/message` with Bearer aut
 3. **Mandatory Rationale:** Never store a memory without technical justification explaining the trade-off.
 4. **Optimistic Concurrency Control:** When updating an existing key, always read `current_hash` first and pass it as `expected_parent_hash`. Never do blind overwrites.
 5. **No AI Attribution in Git:** Machine IDs and model identifiers are logged strictly inside Engram's blame table, never leaked into Git commit trailers.
+
+---
+
+## 6. Repository Sync & Semantic Curation (`engram sync`)
+
+`engram sync` is a repo-agnostic mechanical primitive for batch ingestion and SHA-256 idempotency. Do **not** blindly dump unreviewed files into Engram when a repository has custom task formats, stale docs, or mixed conventions:
+
+1. **Inspect & Curate First:** Scan the repository topology (`docs/`, `.serena/`, `README.md`s, custom backlog folders, sibling `*-docs` repos), discard obsolete or duplicated documents, and verify contradictions against live code.
+2. **Ask on Ambiguity:** If it is unclear whether a document/ticket is still active, superseded, or out of scope, ask the user before ingesting.
+3. **Use `--plan <file.json>` for Curated Sync:** Generate a JSON plan with `<20`-word semantic digests, accurate scopes, explicit `rationale`, active `tasks`, and `complete_tasks` IDs, then run:
+   ```bash
+   engram sync <project_id> --plan /tmp/engram-plan.json --dry-run
+   engram sync <project_id> --plan /tmp/engram-plan.json
+   ```
+4. **Direct Auto-Discovery:** For clean standard repositories (`docs/`, `.serena/memories/`, `.agents/rules/`, EGM `README.md`, `TODO.md`), `engram sync [--docs <dir>] [--dry-run]` can be used directly.

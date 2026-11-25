@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +26,7 @@ type syncMemoryItem struct {
 	Content     string
 	ContentHash string
 	SourcePath  string
+	Rationale   string
 	Category    string
 }
 
@@ -39,16 +39,43 @@ type syncTaskItem struct {
 }
 
 type syncPlan struct {
-	ProjectID string
-	RootDir   string
-	Memories  []syncMemoryItem
-	Tasks     []syncTaskItem
+	ProjectID        string
+	RootDir          string
+	Memories         []syncMemoryItem
+	Tasks            []syncTaskItem
+	CompletedTaskIDs []string
+}
+
+// curatedPlanFile defines the JSON schema accepted by `engram sync --plan <file.json | ->`.
+// Agents use this after semantic curation to execute idempotent batch syncs.
+type curatedPlanFile struct {
+	ProjectID     string            `json:"project_id,omitempty"`
+	Memories      []curatedMemory   `json:"memories,omitempty"`
+	Tasks         []curatedTask     `json:"tasks,omitempty"`
+	CompleteTasks []string          `json:"complete_tasks,omitempty"`
+}
+
+type curatedMemory struct {
+	Key       string `json:"key"`
+	Scope     string `json:"scope,omitempty"`
+	Digest    string `json:"digest,omitempty"`
+	Content   string `json:"content,omitempty"`
+	File      string `json:"file,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
+}
+
+type curatedTask struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Priority    int    `json:"priority,omitempty"`
 }
 
 type syncOptions struct {
 	ProjectID        string
 	Path             string
 	DocsDir          string
+	PlanFile         string
 	ScopeOverride    string
 	Prefix           string
 	DryRun           bool
@@ -88,7 +115,7 @@ var ignoredSyncDirs = map[string]bool{
 
 var (
 	reMDLink       = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
-	reExplicitTask = regexp.MustCompile(`\b((?:TASK|PND|BUG|FEAT|FIX|ADR)-\d+)\b`)
+	reExplicitTask = regexp.MustCompile(`\b((?:TASK|BUG|FEAT|FIX|ADR)-\d+)\b`)
 	reChecklist    = regexp.MustCompile(`^\s*[-*]\s+\[([ xX])\]\s+(.+)$`)
 )
 
@@ -96,18 +123,19 @@ func runSync(serverURL, token string, args []string, out, errOut io.Writer) int 
 	const usage = `Usage: engram sync [project_id] [options]
 
 Auto-discovers and synchronizes documentation, Serena memories, EGM directory READMEs,
-rules, and task files (pendientes/PND-*.md, TODO.md) into the Engram state plane.
+rules, and TODO.md checklists into the Engram state plane, or executes a curated --plan JSON.
 
 Options:
   --project <id>         Project ID override (default: auto-detected from .engram.json / git / dir)
   --path <dir>           Target repository or workspace root (default: .)
   --docs <dir>           Additional or override docs directory (e.g. ../checamos-docs)
+  --plan <file|->        Execute a curated JSON plan file (or '-' for stdin) instead of auto-discovery
   --scope <scope>        Override scope for all synced memories
   --prefix <prefix>      Optional key prefix (e.g. service name)
-  --dry-run              Discover and print plan without mutating Engram
+  --dry-run              Discover/load plan and print summary without mutating Engram
   --force                Re-store memories even if content hash is unchanged
-  --no-tasks             Skip task discovery (TODO.md, pendientes/PND-*.md)
-  --include-completed    Include completed tasks from TODO.md / pendientes
+  --no-tasks             Skip TODO.md task discovery
+  --include-completed    Include completed [x] items from TODO.md
   --only <sources>       Comma-separated filter: docs,serena,egm,rules,tasks
   --concurrency <n>      Number of parallel workers (default: 8)
   --rationale <text>     Custom rationale for memory revisions
@@ -119,6 +147,7 @@ Options:
 	projectFlag := fsFlags.String("project", "", "Project ID override")
 	pathFlag := fsFlags.String("path", ".", "Target repository or workspace root")
 	docsFlag := fsFlags.String("docs", "", "Additional or override docs directory")
+	planFlag := fsFlags.String("plan", "", "Curated JSON plan file or '-' for stdin")
 	scopeFlag := fsFlags.String("scope", "", "Override scope for all synced memories")
 	prefixFlag := fsFlags.String("prefix", "", "Optional key prefix")
 	dryRunFlag := fsFlags.Bool("dry-run", false, "Discover without mutating Engram")
@@ -170,6 +199,7 @@ Options:
 		ProjectID:        projectID,
 		Path:             absRoot,
 		DocsDir:          strings.TrimSpace(*docsFlag),
+		PlanFile:         strings.TrimSpace(*planFlag),
 		ScopeOverride:    strings.TrimSpace(*scopeFlag),
 		Prefix:           strings.Trim(strings.TrimSpace(*prefixFlag), "/"),
 		DryRun:           *dryRunFlag,
@@ -184,7 +214,12 @@ Options:
 		MachineID:        resolveMachineID(*machineFlag),
 	}
 
-	plan, err := buildSyncPlan(opts)
+	var plan *syncPlan
+	if opts.PlanFile != "" {
+		plan, err = loadCuratedPlan(opts)
+	} else {
+		plan, err = buildSyncPlan(opts)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "Error building sync plan: %v\n", err)
 		return 1
@@ -195,12 +230,135 @@ Options:
 		return 0
 	}
 
-	if len(plan.Memories) == 0 && len(plan.Tasks) == 0 {
+	if len(plan.Memories) == 0 && len(plan.Tasks) == 0 && len(plan.CompletedTaskIDs) == 0 {
 		_, _ = fmt.Fprintf(out, "Nothing to sync for project '%s' in %s\n", plan.ProjectID, plan.RootDir)
 		return 0
 	}
 
 	return executeSyncPlan(serverURL, token, plan, opts, out, errOut)
+}
+
+func loadCuratedPlan(opts syncOptions) (*syncPlan, error) {
+	var data []byte
+	var err error
+	if opts.PlanFile == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(opts.PlanFile)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read plan %s: %w", opts.PlanFile, err)
+	}
+
+	var raw curatedPlanFile
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("invalid plan JSON: %w", err)
+	}
+
+	projectID := opts.ProjectID
+	if strings.TrimSpace(raw.ProjectID) != "" && projectID == detectProjectID("", opts.Path) {
+		projectID = strings.TrimSpace(raw.ProjectID)
+	}
+
+	plan := &syncPlan{
+		ProjectID: projectID,
+		RootDir:   opts.Path,
+	}
+
+	seenKeys := make(map[string]bool)
+	for _, m := range raw.Memories {
+		key := strings.TrimSpace(m.Key)
+		if key == "" {
+			continue
+		}
+		if opts.Prefix != "" {
+			key = opts.Prefix + "/" + key
+		}
+		key = sanitizeMemoryKey(key)
+		if seenKeys[key] {
+			continue
+		}
+
+		content := strings.TrimRight(m.Content, "\r\n")
+		sourcePath := m.File
+		if content == "" && m.File != "" {
+			fp := m.File
+			if !filepath.IsAbs(fp) {
+				fp = filepath.Join(opts.Path, fp)
+			}
+			content, err = readTrimmedFile(fp)
+			if err != nil {
+				return nil, fmt.Errorf("memory %q file %s: %w", key, m.File, err)
+			}
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		scope := strings.TrimSpace(m.Scope)
+		if opts.ScopeOverride != "" {
+			scope = opts.ScopeOverride
+		}
+		if scope == "" {
+			scope = "global"
+		}
+		scope = clampString(scope, 64)
+
+		digest := strings.TrimSpace(m.Digest)
+		if digest == "" {
+			digest = extractDigest(content, filepath.Base(key))
+		} else {
+			digest = clampString(digest, 120)
+		}
+
+		seenKeys[key] = true
+		plan.Memories = append(plan.Memories, syncMemoryItem{
+			Key:         key,
+			Scope:       scope,
+			Digest:      digest,
+			Content:     content,
+			ContentHash: sha256Hex(content),
+			SourcePath:  sourcePath,
+			Rationale:   strings.TrimSpace(m.Rationale),
+		})
+	}
+
+	if !opts.NoTasks {
+		seenTasks := make(map[string]bool)
+		for _, t := range raw.Tasks {
+			id := strings.TrimSpace(t.ID)
+			title := strings.TrimSpace(t.Title)
+			if id == "" || title == "" {
+				continue
+			}
+			if opts.Prefix != "" && !strings.HasPrefix(id, opts.Prefix+"-") {
+				id = opts.Prefix + "-" + id
+			}
+			id = clampString(id, 128)
+			if seenTasks[id] {
+				continue
+			}
+			seenTasks[id] = true
+			plan.Tasks = append(plan.Tasks, syncTaskItem{
+				ID:          id,
+				Title:       clampString(title, 255),
+				Description: t.Description,
+				Priority:    t.Priority,
+			})
+		}
+		for _, id := range raw.CompleteTasks {
+			tid := strings.TrimSpace(id)
+			if tid == "" {
+				continue
+			}
+			if opts.Prefix != "" && !strings.HasPrefix(tid, opts.Prefix+"-") {
+				tid = opts.Prefix + "-" + tid
+			}
+			plan.CompletedTaskIDs = append(plan.CompletedTaskIDs, clampString(tid, 128))
+		}
+	}
+
+	return plan, nil
 }
 
 func parseOnlyFilter(only string) map[string]bool {
@@ -231,7 +389,6 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 		RootDir:   opts.Path,
 	}
 
-	// Resolve explicit or configured docs directories
 	explicitDocsDirs := resolveExplicitDocsDirs(opts.Path, opts.ProjectID, opts.DocsDir)
 	explicitDocsSet := make(map[string]bool, len(explicitDocsDirs))
 	for _, d := range explicitDocsDirs {
@@ -341,7 +498,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 		}
 	}
 
-	// 2. Walk the target workspace for Serena, Rules, Docs, EGM READMEs, Root MDs, and Tasks
+	// 2. Walk the target workspace for Serena, Rules, Docs, EGM READMEs, Root MDs, and TODO.md
 	err := filepath.WalkDir(opts.Path, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -379,15 +536,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 		relSlash := filepath.ToSlash(rel)
 		lowerRel := strings.ToLower(relSlash)
 
-		// A. Tasks: pendientes/PND-*.md
-		if strings.Contains(lowerRel, "pendientes/") && strings.HasPrefix(strings.ToUpper(name), "PND-") {
-			if t, ok := parsePendienteFile(absPath, opts.IncludeCompleted); ok {
-				addTask(t)
-			}
-			return nil
-		}
-
-		// B. Tasks: TODO.md anywhere in project
+		// A. Standard TODO.md checklists
 		if strings.EqualFold(name, "TODO.md") {
 			for _, t := range parseTodoFile(absPath, relSlash, opts.IncludeCompleted) {
 				addTask(t)
@@ -400,7 +549,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 			return nil
 		}
 
-		// C. Serena memories (.serena/memories/... or .serena/...)
+		// B. Serena memories (.serena/memories/... or .serena/...)
 		if strings.HasPrefix(lowerRel, ".serena/") || strings.Contains(lowerRel, "/.serena/") {
 			if !categoryAllowed(allowed, "serena") {
 				return nil
@@ -420,7 +569,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 			return nil
 		}
 
-		// D. Rules (.agents/rules, .cursor/rules, AGENTS.md, CLAUDE.md, GEMINI.md)
+		// C. Rules (.agents/rules, .cursor/rules, AGENTS.md, CLAUDE.md, GEMINI.md)
 		if strings.HasPrefix(lowerRel, ".agents/rules/") ||
 			strings.HasPrefix(lowerRel, ".cursor/rules/") ||
 			strings.Contains(lowerRel, "/.agents/rules/") ||
@@ -443,12 +592,12 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 			return nil
 		}
 
-		// E. Skip other hidden dot-directories (except .egm/)
+		// D. Skip other hidden dot-directories (except .egm/)
 		if strings.HasPrefix(relSlash, ".") && !strings.HasPrefix(lowerRel, ".egm/") {
 			return nil
 		}
 
-		// F. Docs directories (docs/, doc/, documentation/, *-docs/)
+		// E. Docs directories (docs/, doc/, documentation/, *-docs/)
 		if isInsideDocsDir(lowerRel) {
 			if !categoryAllowed(allowed, "docs") {
 				return nil
@@ -471,7 +620,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 			return nil
 		}
 
-		// G. EGM directory READMEs & .egm/
+		// F. EGM directory READMEs & .egm/
 		if strings.EqualFold(name, "README.md") {
 			if !categoryAllowed(allowed, "egm") {
 				return nil
@@ -517,7 +666,7 @@ func buildSyncPlan(opts syncOptions) (*syncPlan, error) {
 			return nil
 		}
 
-		// H. Root-level markdowns (ARCHITECTURE.md, CONVENTIONS.md, etc.)
+		// G. Root-level markdowns (ARCHITECTURE.md, CONVENTIONS.md, etc.)
 		if !strings.Contains(relSlash, "/") {
 			if !categoryAllowed(allowed, "docs") {
 				return nil
@@ -562,7 +711,6 @@ func resolveExplicitDocsDirs(absRoot, projectID, docsFlag string) []string {
 		}
 	}
 
-	// Check .engram.json docs.root if configured
 	if cfgPath := findEngramConfig(absRoot); cfgPath != "" {
 		if data, err := os.ReadFile(cfgPath); err == nil {
 			var cfg EngramConfig
@@ -578,7 +726,6 @@ func resolveExplicitDocsDirs(absRoot, projectID, docsFlag string) []string {
 		}
 	}
 
-	// Sibling independent docs repo (e.g. ../<projectID>-docs, like checamos-docs)
 	if projectID != "" {
 		siblingDocs := filepath.Join(filepath.Dir(absRoot), projectID+"-docs")
 		if dirExists(siblingDocs) {
@@ -681,7 +828,6 @@ func extractDigest(content, fallbackFilename string) string {
 	lines := strings.Split(normalized, "\n")
 
 	startIdx := 0
-	// Parse YAML frontmatter if present
 	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
 		for i := 1; i < len(lines); i++ {
 			trimmed := strings.TrimSpace(lines[i])
@@ -754,64 +900,6 @@ func cleanMarkdownInline(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func parsePendienteFile(absPath string, includeCompleted bool) (syncTaskItem, bool) {
-	raw, err := readTrimmedFile(absPath)
-	if err != nil || raw == "" {
-		return syncTaskItem{}, false
-	}
-
-	base := stripMDExt(filepath.Base(absPath))
-	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
-	lines := strings.Split(normalized, "\n")
-
-	title := base
-	priority := 0
-	completed := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "status:") || strings.HasPrefix(lower, "estado:") {
-			val := strings.ToLower(strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1]))
-			if strings.Contains(val, "completed") || strings.Contains(val, "done") ||
-				strings.Contains(val, "closed") || strings.Contains(val, "completad") ||
-				strings.Contains(val, "resuelt") {
-				completed = true
-			}
-		}
-		if strings.HasPrefix(lower, "priority:") || strings.HasPrefix(lower, "prioridad:") {
-			val := strings.ToLower(strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1]))
-			if n, convErr := strconv.Atoi(val); convErr == nil {
-				priority = n
-			} else if strings.Contains(val, "high") || strings.Contains(val, "alta") || strings.Contains(val, "crit") {
-				priority = 10
-			} else if strings.Contains(val, "med") {
-				priority = 5
-			} else if strings.Contains(val, "low") || strings.Contains(val, "baja") {
-				priority = 1
-			}
-		}
-		if title == base && strings.HasPrefix(trimmed, "#") {
-			h := cleanMarkdownInline(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
-			if h != "" {
-				title = h
-			}
-		}
-	}
-
-	if completed && !includeCompleted {
-		return syncTaskItem{}, false
-	}
-
-	return syncTaskItem{
-		ID:          base,
-		Title:       title,
-		Description: raw,
-		Priority:    priority,
-		SourcePath:  absPath,
-	}, true
-}
-
 func parseTodoFile(absPath, relSlash string, includeCompleted bool) []syncTaskItem {
 	raw, err := readTrimmedFile(absPath)
 	if err != nil || raw == "" {
@@ -867,6 +955,9 @@ func printSyncDryRun(plan *syncPlan, out io.Writer) {
 	_, _ = fmt.Fprintf(out, "Dry-run sync plan for project '%s' (%s):\n", plan.ProjectID, plan.RootDir)
 	_, _ = fmt.Fprintf(out, "  Memories discovered: %d\n", len(plan.Memories))
 	_, _ = fmt.Fprintf(out, "  Tasks discovered:    %d\n", len(plan.Tasks))
+	if len(plan.CompletedTaskIDs) > 0 {
+		_, _ = fmt.Fprintf(out, "  Tasks to complete:   %d\n", len(plan.CompletedTaskIDs))
+	}
 
 	byScope := make(map[string]int)
 	for _, m := range plan.Memories {
@@ -911,7 +1002,6 @@ func printSyncDryRun(plan *syncPlan, out io.Writer) {
 }
 
 func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, out, errOut io.Writer) int {
-	// 1. Ensure project exists
 	projRes, err := callTool(serverURL, token, "create_project", map[string]interface{}{
 		"project_id":  plan.ProjectID,
 		"name":        plan.ProjectID,
@@ -926,7 +1016,6 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 		return 1
 	}
 
-	// 2. Fetch existing manifest to avoid unnecessary blame/recall checks for new keys
 	existingKeys := make(map[string]bool)
 	if !opts.Force {
 		manRes, manErr := callTool(serverURL, token, "list_memory_manifest", map[string]string{
@@ -947,6 +1036,7 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 	var storedCount atomic.Int64
 	var skippedCount atomic.Int64
 	var taskCount atomic.Int64
+	var completedCount atomic.Int64
 	var errCount atomic.Int64
 
 	var errMu sync.Mutex
@@ -960,7 +1050,6 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 		errMu.Unlock()
 	}
 
-	// 3. Sync memories concurrently
 	if len(plan.Memories) > 0 {
 		memCh := make(chan syncMemoryItem, len(plan.Memories))
 		for _, m := range plan.Memories {
@@ -988,7 +1077,14 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 
 					rationale := opts.Rationale
 					if rationale == "" {
-						rationale = "engram sync: " + m.SourcePath
+						rationale = m.Rationale
+					}
+					if rationale == "" {
+						if m.SourcePath != "" {
+							rationale = "engram sync: " + m.SourcePath
+						} else {
+							rationale = "engram sync: curated plan"
+						}
 					}
 
 					payload := map[string]interface{}{
@@ -1021,7 +1117,6 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 		wg.Wait()
 	}
 
-	// 4. Sync tasks concurrently
 	if len(plan.Tasks) > 0 {
 		taskCh := make(chan syncTaskItem, len(plan.Tasks))
 		for _, t := range plan.Tasks {
@@ -1062,10 +1157,98 @@ func executeSyncPlan(serverURL, token string, plan *syncPlan, opts syncOptions, 
 		wg.Wait()
 	}
 
+	if len(plan.CompletedTaskIDs) > 0 {
+		existingPending := make(map[string]bool)
+		lsRes, lsErr := callTool(serverURL, token, "list_tasks", map[string]interface{}{
+			"project_id": plan.ProjectID,
+			"status":     "pending",
+			"limit":      2000,
+		})
+		if lsErr == nil && !lsRes.IsError && len(lsRes.Content) > 0 {
+			var pendingTasks []struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal([]byte(lsRes.Content[0].Text), &pendingTasks) == nil {
+				for _, pt := range pendingTasks {
+					existingPending[pt.ID] = true
+				}
+			}
+		}
+
+		var toComplete []string
+		for _, id := range plan.CompletedTaskIDs {
+			if existingPending[id] {
+				toComplete = append(toComplete, id)
+			}
+		}
+
+		if len(toComplete) > 0 {
+			compCh := make(chan string, len(toComplete))
+			for _, id := range toComplete {
+				compCh <- id
+			}
+			close(compCh)
+
+			var wg sync.WaitGroup
+			workers := opts.Concurrency
+			if workers > len(toComplete) {
+				workers = len(toComplete)
+			}
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for id := range compCh {
+						claimRes, err := callTool(serverURL, token, "claim_task", map[string]interface{}{
+							"project_id":  plan.ProjectID,
+							"task_id":     id,
+							"leased_by":   opts.Author,
+							"ttl_seconds": 60,
+						})
+						if err != nil {
+							recordErr(fmt.Sprintf("claim closed task %s: %v", id, err))
+							continue
+						}
+						if claimRes.IsError {
+							recordErr(fmt.Sprintf("claim closed task %s: %s", id, firstToolText(claimRes)))
+							continue
+						}
+						var claimed struct {
+							LeaseID string `json:"lease_id"`
+						}
+						if len(claimRes.Content) == 0 || json.Unmarshal([]byte(claimRes.Content[0].Text), &claimed) != nil || claimed.LeaseID == "" {
+							recordErr(fmt.Sprintf("claim closed task %s: missing lease_id", id))
+							continue
+						}
+
+						res, err := callTool(serverURL, token, "complete_task", map[string]interface{}{
+							"project_id": plan.ProjectID,
+							"task_id":    id,
+							"lease_id":   claimed.LeaseID,
+						})
+						if err != nil {
+							recordErr(fmt.Sprintf("complete task %s: %v", id, err))
+							continue
+						}
+						if res.IsError {
+							recordErr(fmt.Sprintf("complete task %s: %s", id, firstToolText(res)))
+							continue
+						}
+						completedCount.Add(1)
+					}
+				}()
+			}
+			wg.Wait()
+		}
+	}
+
 	_, _ = fmt.Fprintf(out, "Engram sync complete for '%s':\n", plan.ProjectID)
 	_, _ = fmt.Fprintf(out, "  Memories stored:    %d\n", storedCount.Load())
 	_, _ = fmt.Fprintf(out, "  Memories unchanged: %d\n", skippedCount.Load())
 	_, _ = fmt.Fprintf(out, "  Tasks synced:       %d\n", taskCount.Load())
+	if completedCount.Load() > 0 {
+		_, _ = fmt.Fprintf(out, "  Tasks reconciled:   %d (marked completed)\n", completedCount.Load())
+	}
 	if errCount.Load() > 0 {
 		_, _ = fmt.Fprintf(errOut, "  Errors:             %d\n", errCount.Load())
 		for _, e := range firstErrors {
