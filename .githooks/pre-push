@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${ENGRAM_SKIP_PRE_PUSH_REBUILD:-0}" = "1" ]; then
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$REPO_ROOT"
+
+SHOULD_REBUILD=0
+RELEASE_TAG=""
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  [ -z "${local_ref:-}" ] && continue
+  [ "$local_sha" = "$ZERO_SHA" ] && continue
+
+  case "$local_ref" in
+    refs/tags/v*)
+      SHOULD_REBUILD=1
+      RELEASE_TAG="${local_ref#refs/tags/}"
+      ;;
+    refs/heads/main)
+      SHOULD_REBUILD=1
+      ;;
+  esac
+done
+
+if [ "$SHOULD_REBUILD" -ne 1 ]; then
+  exit 0
+fi
+
+VERSION="${RELEASE_TAG:-$(git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0-dev")}"
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
+DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+echo "[engram pre-push] Rebuilding local binaries & Docker stack (version=${VERSION}, commit=${COMMIT})..."
+
+if command -v go >/dev/null 2>&1; then
+  mkdir -p bin
+  LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+  CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/engram ./cmd/engram
+  echo "[engram pre-push] Rebuilt local CLI: bin/engram"
+fi
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  docker compose build \
+    --build-arg "VERSION=${VERSION}" \
+    --build-arg "COMMIT=${COMMIT}" \
+    --build-arg "DATE=${DATE}" \
+    engramd
+
+  if [ -n "$RELEASE_TAG" ]; then
+    docker tag ghcr.io/ivangsm/engram:latest "ghcr.io/ivangsm/engram:${RELEASE_TAG#v}" >/dev/null 2>&1 || true
+    docker tag ghcr.io/ivangsm/engram:latest "ghcr.io/ivangsm/engram:${RELEASE_TAG}" >/dev/null 2>&1 || true
+  fi
+
+  if docker ps --format '{{.Names}}' | grep -qx 'engram-daemon'; then
+    echo "[engram pre-push] Recreating running engram-daemon container..."
+    docker compose up -d --no-deps engramd
+  else
+    echo "[engram pre-push] Updated image ghcr.io/ivangsm/engram:latest (engram-daemon not currently running)."
+  fi
+else
+  echo "[engram pre-push] Warning: Docker daemon unreachable; skipped container image rebuild."
+fi

@@ -6,7 +6,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-DOCKER_IMAGE ?= engram:latest
+DOCKER_IMAGE ?= ghcr.io/ivangsm/engram:latest
 
 .PHONY: help
 help: ## Mostrar comandos disponibles
@@ -32,6 +32,29 @@ verify: lint test build ## Ejecutar suite completa de verificación (lint, test,
 .PHONY: docker-build
 docker-build: ## Construir imagen optimizada de Docker localmente
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) -t $(DOCKER_IMAGE) .
+
+.PHONY: docker-refresh
+docker-refresh: build docker-build ## Reconstruir CLI y recrear contenedor engramd con la imagen local
+	docker compose up -d --no-deps engramd
+
+.PHONY: install-hooks
+install-hooks: ## Activar Git hooks locales (.githooks/pre-push)
+	chmod +x .githooks/*
+	git config core.hooksPath .githooks
+	@echo "Git hooks activados (core.hooksPath=.githooks)"
+
+.PHONY: release
+release: ## Etiquetar, publicar release y reconstruir stack local (uso: make release VERSION=v0.3.1)
+	@test -n "$(VERSION)" || (echo "Error: especifica VERSION=vX.Y.Z" >&2; exit 1)
+	@echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+' || (echo "Error: VERSION debe tener formato semver vX.Y.Z" >&2; exit 1)
+	$(MAKE) verify
+	git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	git push origin main "$(VERSION)"
+	@if command -v gh >/dev/null 2>&1; then \
+		gh workflow run ci.yml --ref main; \
+		gh workflow run docker-publish.yml --ref "$(VERSION)"; \
+		gh workflow run release.yml --ref "$(VERSION)"; \
+	fi
 
 .PHONY: compose-up
 compose-up: ## Iniciar postgres y daemon engramd en segundo plano

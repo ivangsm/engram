@@ -168,6 +168,7 @@ func TestCLI_HelpFlags(t *testing.T) {
 		{"handoff", "--help"},
 		{"project", "--help"},
 		{"init", "--help"},
+		{"sync", "--help"},
 		{"manifest", "--help"},
 		{"recall", "--help"},
 		{"search", "--help"},

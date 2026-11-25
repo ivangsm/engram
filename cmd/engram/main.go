@@ -46,6 +46,8 @@ func run(args []string, serverURL, token string, out, errOut io.Writer) int {
 		return 0
 	case "init":
 		return runInit(serverURL, token, subargs, out, errOut)
+	case "sync":
+		return runSync(serverURL, token, subargs, out, errOut)
 	case "project":
 		return runProject(serverURL, token, subargs, out, errOut)
 	case "manifest":
@@ -83,6 +85,9 @@ Usage:
 Commands:
   init [--project <id>] [--name <name>] [--docs <dir>] [--todo <file>]
       Auto-detect topology, register project namespace in daemon, and write .engram.json
+
+  sync [project_id] [--path <dir>] [--docs <dir>] [--dry-run] [--only <sources>]
+      Auto-discover and sync docs, Serena memories, EGM READMEs, rules, and tasks (PND-*/TODO.md)
 
   project <ls|get|create|rm> [arguments]
       Manage project namespaces in daemon
@@ -179,6 +184,8 @@ func parseSubcommandFlags(fs *flag.FlagSet, args []string, usageText string, out
 	return false, true
 }
 
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 func callTool(serverURL, token, toolName string, toolArgs interface{}) (*mcp.CallToolResult, error) {
 	argsBytes, err := json.Marshal(toolArgs)
 	if err != nil {
@@ -209,8 +216,7 @@ func callTool(serverURL, token, toolName string, toolArgs interface{}) (*mcp.Cal
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("daemon connection failed: %w", err)
 	}

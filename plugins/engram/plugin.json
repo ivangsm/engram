@@ -3,6 +3,7 @@
   "displayName": "Engram Memory & State Plane",
   "version": "1.0.0",
   "description": "High-density state and memory plane: progressive disclosure, atomic task leases, immutable handoffs, and cryptographic blame.",
+  "logo": "assets/logo.svg",
   "author": {
     "name": "Ivan"
   },

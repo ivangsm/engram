@@ -20,6 +20,9 @@ services:
 
   engramd:
     image: ghcr.io/ivangsm/engram:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: engram-daemon
     restart: unless-stopped
     depends_on:
