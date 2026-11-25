@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,11 +12,13 @@ import (
 	"github.com/pgvector/pgvector-go"
 
 	"github.com/ivan/engram/internal/db"
+	"github.com/ivan/engram/internal/platform/embeddings"
 )
 
 type Service struct {
-	pool    *pgxpool.Pool
-	queries *db.Queries
+	pool     *pgxpool.Pool
+	queries  *db.Queries
+	embedder embeddings.Provider
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
@@ -23,6 +26,20 @@ func NewService(pool *pgxpool.Pool) *Service {
 		pool:    pool,
 		queries: db.New(pool),
 	}
+}
+
+// NewServiceWithEmbedder constructs a memories Service with an optional embedding provider.
+func NewServiceWithEmbedder(pool *pgxpool.Pool, embedder embeddings.Provider) *Service {
+	return &Service{
+		pool:     pool,
+		queries:  db.New(pool),
+		embedder: embedder,
+	}
+}
+
+// SetEmbedder configures an optional embedding provider on the service.
+func (s *Service) SetEmbedder(embedder embeddings.Provider) {
+	s.embedder = embedder
 }
 
 // EstimateTokens calculates an approximate token count for English/Code text.
@@ -82,15 +99,17 @@ func (s *Service) GetManifest(ctx context.Context, projectID, scope string) ([]M
 }
 
 type MemoryDetail struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	Key        string    `json:"key"`
-	Scope      string    `json:"scope"`
-	Digest     string    `json:"digest"`
-	Content    string    `json:"content"`
-	TokenCount int32     `json:"token_count"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	Key            string    `json:"key"`
+	Scope          string    `json:"scope"`
+	Digest         string    `json:"digest"`
+	Content        string    `json:"content"`
+	TokenCount     int32     `json:"token_count"`
+	ContentHash    string    `json:"content_hash,omitempty"`
+	RevisionNumber int32     `json:"revision_number,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (s *Service) Recall(ctx context.Context, projectID, key string) (*MemoryDetail, error) {
@@ -113,15 +132,17 @@ func (s *Service) Recall(ctx context.Context, projectID, key string) (*MemoryDet
 		row.ID.Bytes[10:16])
 
 	return &MemoryDetail{
-		ID:         idStr,
-		ProjectID:  row.ProjectID,
-		Key:        row.Key,
-		Scope:      row.Scope,
-		Digest:     row.Digest,
-		Content:    row.Content,
-		TokenCount: row.TokenCount,
-		CreatedAt:  row.CreatedAt.Time,
-		UpdatedAt:  row.UpdatedAt.Time,
+		ID:             idStr,
+		ProjectID:      row.ProjectID,
+		Key:            row.Key,
+		Scope:          row.Scope,
+		Digest:         row.Digest,
+		Content:        row.Content,
+		TokenCount:     row.TokenCount,
+		ContentHash:    row.ContentHash,
+		RevisionNumber: row.RevisionNumber,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}, nil
 }
 
@@ -158,6 +179,34 @@ type StoreResult struct {
 	RevisionNumber int32  `json:"revision_number"`
 	ContentHash    string `json:"content_hash"`
 	TokenCount     int32  `json:"token_count"`
+}
+
+// defaultDigest extracts a single-line fallback digest from content when no explicit digest exists.
+func defaultDigest(content string) string {
+	var firstLine string
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			firstLine = trimmed
+			break
+		}
+	}
+	runes := []rune(firstLine)
+	if len(runes) > 120 {
+		return string(runes[:117]) + "..."
+	}
+	return firstLine
+}
+
+// resolveDigestForStore preserves an existing curated digest when an update omits --digest.
+func resolveDigestForStore(explicitDigest, existingDigest, content string) string {
+	if strings.TrimSpace(explicitDigest) != "" {
+		return explicitDigest
+	}
+	if strings.TrimSpace(existingDigest) != "" {
+		return existingDigest
+	}
+	return defaultDigest(content)
 }
 
 func (s *Service) Store(ctx context.Context, in StoreInput) (*StoreResult, error) {
@@ -207,11 +256,13 @@ func (s *Service) Store(ctx context.Context, in StoreInput) (*StoreResult, error
 
 	var parentHash *string
 	var prevContent string
+	var existingDigest string
 	var revisionNumber int32 = 1
 
 	if err == nil {
 		// Existing memory found
 		prevContent = existing.Content
+		existingDigest = existing.Digest
 		if existing.LatestRevisionID.Valid {
 			lastRev, err := qtx.GetLatestRevisionForMemory(ctx, existing.ID)
 			if err == nil {
@@ -232,6 +283,17 @@ func (s *Service) Store(ctx context.Context, in StoreInput) (*StoreResult, error
 				}
 			}
 		}
+	}
+
+	in.Digest = resolveDigestForStore(in.Digest, existingDigest, in.Content)
+
+	if len(in.Embedding) == 0 && s.embedder != nil {
+		embedInput := fmt.Sprintf("%s\n%s\n%s", in.Key, in.Digest, in.Content)
+		vec, embedErr := s.embedder.Embed(ctx, embedInput)
+		if embedErr != nil {
+			return nil, fmt.Errorf("failed to generate embedding: %w", embedErr)
+		}
+		in.Embedding = vec
 	}
 
 	contentHash := ComputeSHA256(in.Content)
@@ -427,6 +489,14 @@ type SearchItem struct {
 func (s *Service) Search(ctx context.Context, projectID, query string, embedding []float32, limit int32) ([]SearchItem, error) {
 	if limit <= 0 {
 		limit = 10
+	}
+
+	if len(embedding) == 0 && s.embedder != nil {
+		vec, embedErr := s.embedder.Embed(ctx, query)
+		if embedErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embedErr)
+		}
+		embedding = vec
 	}
 
 	if len(embedding) > 0 {

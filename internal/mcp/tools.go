@@ -99,6 +99,31 @@ func (r *Registry) ListTools() []Tool {
 			},
 		},
 		{
+			Name:        "list_tasks",
+			Description: "Lists operational tasks for a project, optionally filtered by status.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"project_id": {Type: "string", Description: "Project/repository identifier"},
+					"status":     {Type: "string", Description: "Optional status filter (pending, in_progress, completed, failed, blocked)"},
+					"limit":      {Type: "integer", Description: "Maximum number of tasks to return (default: 50)"},
+				},
+				Required: []string{"project_id"},
+			},
+		},
+		{
+			Name:        "get_task",
+			Description: "Returns detailed state and lease metadata for a specific task.",
+			InputSchema: ToolSchema{
+				Type: "object",
+				Properties: map[string]PropertyDef{
+					"project_id": {Type: "string", Description: "Project/repository identifier"},
+					"task_id":    {Type: "string", Description: "Task identifier"},
+				},
+				Required: []string{"project_id", "task_id"},
+			},
+		},
+		{
 			Name:        "claim_task",
 			Description: "Atomically claims a task lease using row-level locking (FOR UPDATE SKIP LOCKED). If task_id is omitted, claims highest priority pending task.",
 			InputSchema: ToolSchema{
@@ -128,7 +153,7 @@ func (r *Registry) ListTools() []Tool {
 		},
 		{
 			Name:        "record_handoff",
-			Description: "Records an immutable cross-agent handoff. Enforces strict contract: <150 words summary, valid verdict, and reproducible evidence.",
+			Description: "Records an immutable cross-agent handoff. Enforces strict contract: <150 words summary, valid verdict, and reproducible evidence. Optionally completes the task atomically.",
 			InputSchema: ToolSchema{
 				Type: "object",
 				Properties: map[string]PropertyDef{
@@ -140,6 +165,8 @@ func (r *Registry) ListTools() []Tool {
 					"summary":               {Type: "string", Description: "Strictly <150 words executive summary of progress and remaining work"},
 					"reproducible_evidence": {Type: "string", Description: "Commands, test outputs, or reproducible artifact hashes"},
 					"artifacts":             {Type: "string", Description: "JSON serialized string of changed file paths, PRs, or logs"},
+					"complete_task":         {Type: "boolean", Description: "If true, atomically marks the task completed in the same transaction"},
+					"lease_id":              {Type: "string", Description: "Optional active lease UUID token for fenced task completion"},
 				},
 				Required: []string{"project_id", "task_id", "from_agent", "verdict", "summary", "reproducible_evidence"},
 			},
@@ -289,26 +316,12 @@ func (r *Registry) ExecuteTool(ctx context.Context, name string, args json.RawMe
 		if in.AuthorUser == "" {
 			in.AuthorUser = os.Getenv("USER")
 			if in.AuthorUser == "" {
-				in.AuthorUser = "ivan"
+				in.AuthorUser = "unknown"
 			}
 		}
 		if in.MachineID == "" {
 			hostname, _ := os.Hostname()
 			in.MachineID = hostname
-		}
-		if in.Digest == "" {
-			// Extract first line as fallback digest
-			firstLine := in.Content
-			for i, r := range in.Content {
-				if r == '\n' || r == '\r' {
-					firstLine = in.Content[:i]
-					break
-				}
-			}
-			if len(firstLine) > 120 {
-				firstLine = firstLine[:117] + "..."
-			}
-			in.Digest = firstLine
 		}
 
 		res, err := r.memoriesSvc.Store(ctx, memories.StoreInput{
@@ -380,6 +393,37 @@ func (r *Registry) ExecuteTool(ctx context.Context, name string, args json.RawMe
 		data, _ := json.MarshalIndent(t, "", "  ")
 		return textResult(string(data)), nil
 
+	case "list_tasks":
+		var in struct {
+			ProjectID string `json:"project_id"`
+			Status    string `json:"status"`
+			Limit     int32  `json:"limit"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+		tasks, err := r.stateSvc.ListTasks(ctx, in.ProjectID, in.Status, in.Limit)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(tasks, "", "  ")
+		return textResult(string(data)), nil
+
+	case "get_task":
+		var in struct {
+			ProjectID string `json:"project_id"`
+			TaskID    string `json:"task_id"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+		t, err := r.stateSvc.GetTask(ctx, in.ProjectID, in.TaskID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(t, "", "  ")
+		return textResult(string(data)), nil
+
 	case "claim_task":
 		var in struct {
 			ProjectID  string `json:"project_id"`
@@ -424,6 +468,8 @@ func (r *Registry) ExecuteTool(ctx context.Context, name string, args json.RawMe
 			Summary              string  `json:"summary"`
 			ReproducibleEvidence string  `json:"reproducible_evidence"`
 			Artifacts            string  `json:"artifacts"`
+			CompleteTask         bool    `json:"complete_task"`
+			LeaseID              string  `json:"lease_id"`
 		}
 		if err := json.Unmarshal(args, &in); err != nil {
 			return errorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -443,6 +489,8 @@ func (r *Registry) ExecuteTool(ctx context.Context, name string, args json.RawMe
 			Summary:              in.Summary,
 			ReproducibleEvidence: in.ReproducibleEvidence,
 			Artifacts:            artifactsRaw,
+			CompleteTask:         in.CompleteTask,
+			LeaseID:              in.LeaseID,
 		})
 		if err != nil {
 			return errorResult(err.Error()), nil

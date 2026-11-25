@@ -91,22 +91,25 @@ func (q *Queries) PruneSupersededMemories(ctx context.Context, projectID string)
 
 const recallMemory = `-- name: RecallMemory :one
 SELECT 
-    id,
-    project_id,
-    key,
-    scope,
-    digest,
-    content,
-    token_count,
-    latest_revision_id,
-    superseded_by,
-    is_active,
-    created_at,
-    updated_at
-FROM agent_memories
-WHERE project_id = $1
-  AND key = $2
-  AND is_active = true
+    m.id,
+    m.project_id,
+    m.key,
+    m.scope,
+    m.digest,
+    m.content,
+    m.token_count,
+    m.latest_revision_id,
+    m.superseded_by,
+    m.is_active,
+    m.created_at,
+    m.updated_at,
+    COALESCE(r.content_hash, '')::varchar(64) AS content_hash,
+    COALESCE(r.revision_number, 0)::int AS revision_number
+FROM agent_memories m
+LEFT JOIN engram_revisions r ON r.id = m.latest_revision_id
+WHERE m.project_id = $1
+  AND m.key = $2
+  AND m.is_active = true
 LIMIT 1
 `
 
@@ -128,6 +131,8 @@ type RecallMemoryRow struct {
 	IsActive         bool               `json:"is_active"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	ContentHash      string             `json:"content_hash"`
+	RevisionNumber   int32              `json:"revision_number"`
 }
 
 func (q *Queries) RecallMemory(ctx context.Context, arg RecallMemoryParams) (RecallMemoryRow, error) {
@@ -146,6 +151,8 @@ func (q *Queries) RecallMemory(ctx context.Context, arg RecallMemoryParams) (Rec
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ContentHash,
+		&i.RevisionNumber,
 	)
 	return i, err
 }
@@ -161,10 +168,10 @@ SELECT
     token_count,
     latest_revision_id,
     updated_at,
-    (1 - (embedding <=> $3))::float8 AS vector_similarity,
+    COALESCE((1 - (embedding <=> $3))::float8, 0.0)::float8 AS vector_similarity,
     ts_rank(tsv, plainto_tsquery('english', $2))::float8 AS text_rank,
     (
-        ($4::float8 * (1 - (embedding <=> $3))::float8) + 
+        ($4::float8 * COALESCE((1 - (embedding <=> $3))::float8, 0.0)::float8) + 
         ((1 - $4::float8) * ts_rank(tsv, plainto_tsquery('english', $2))::float8)
     )::float8 AS combined_score
 FROM agent_memories
@@ -172,7 +179,7 @@ WHERE project_id = $1
   AND is_active = true
   AND (
       tsv @@ plainto_tsquery('english', $2) 
-      OR (embedding <=> $3) < $5::float8
+      OR (embedding IS NOT NULL AND (embedding <=> $3) < $5::float8)
   )
 ORDER BY combined_score DESC
 LIMIT $6

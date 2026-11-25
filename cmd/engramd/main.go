@@ -24,6 +24,7 @@ import (
 	"github.com/ivan/engram/internal/mcp"
 	"github.com/ivan/engram/internal/platform/auth"
 	platformdb "github.com/ivan/engram/internal/platform/db"
+	"github.com/ivan/engram/internal/platform/embeddings"
 )
 
 func getEnv(key, fallback string) string {
@@ -45,7 +46,7 @@ func getEnvInt(key string, fallback int) int {
 func main() {
 	port := getEnvInt("ENGRAM_PORT", 8085)
 	dbHost := getEnv("ENGRAM_DB_HOST", "localhost")
-	dbPort := getEnvInt("ENGRAM_DB_PORT", 5433)
+	dbPort := getEnvInt("ENGRAM_DB_PORT", 5439)
 	dbUser := getEnv("ENGRAM_DB_USER", "engram")
 	dbPass := getEnv("ENGRAM_DB_PASSWORD", "engram_dev_secret")
 	dbName := getEnv("ENGRAM_DB_NAME", "engram")
@@ -91,8 +92,16 @@ func main() {
 	var mcpServer *mcp.Server
 	var outboxListener *platformdb.OutboxListener
 
+	embedder, err := embeddings.NewFromEnv()
+	if err != nil {
+		log.Fatalf("[engramd] Embedding provider configuration error: %v", err)
+	}
+	if embedder != nil {
+		log.Printf("[engramd] Embeddings provider enabled: %s", embedder.Name())
+	}
+
 	if pool != nil {
-		memSvc = memories.NewService(pool)
+		memSvc = memories.NewServiceWithEmbedder(pool, embedder)
 		stateSvc = state.NewService(pool)
 		projSvc = projects.NewService(pool)
 		mcpRegistry := mcp.NewRegistry(memSvc, stateSvc, projSvc)

@@ -441,26 +441,46 @@ func (s *Service) RecordHandoff(ctx context.Context, in HandoffInput) (*HandoffD
 
 	in.Verdict = strings.ToUpper(strings.TrimSpace(in.Verdict))
 
+	var leaseUUID pgtype.UUID
+	if in.CompleteTask && in.LeaseID != "" {
+		parsed, err := parseUUID(in.LeaseID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid lease_id: %w", err)
+		}
+		leaseUUID = parsed
+	}
+
 	artifactsBytes := []byte("[]")
 	if len(in.Artifacts) > 0 {
 		artifactsBytes = in.Artifacts
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+
 	// Ensure project and task exist
-	_, _ = s.queries.CreateProject(ctx, db.CreateProjectParams{
+	if _, err := qtx.CreateProject(ctx, db.CreateProjectParams{
 		ID:          in.ProjectID,
 		Name:        in.ProjectID,
 		Description: "Auto-created project namespace",
-	})
+		Settings:    []byte("{}"),
+	}); err != nil {
+		return nil, fmt.Errorf("failed to ensure project exists: %w", err)
+	}
 
-	_, err := s.queries.GetTask(ctx, db.GetTaskParams{
+	_, err = qtx.GetTask(ctx, db.GetTaskParams{
 		ProjectID: in.ProjectID,
 		ID:        in.TaskID,
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// Auto create placeholder task if not already present
-			_, _ = s.queries.CreateTask(ctx, db.CreateTaskParams{
+			if _, createErr := qtx.CreateTask(ctx, db.CreateTaskParams{
 				ProjectID:   in.ProjectID,
 				ID:          in.TaskID,
 				Title:       in.TaskID,
@@ -468,11 +488,15 @@ func (s *Service) RecordHandoff(ctx context.Context, in HandoffInput) (*HandoffD
 				Status:      "in_progress",
 				Priority:    0,
 				Metadata:    []byte("{}"),
-			})
+			}); createErr != nil {
+				return nil, fmt.Errorf("failed to auto-create task for handoff: %w", createErr)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to look up task: %w", err)
 		}
 	}
 
-	h, err := s.queries.CreateHandoff(ctx, db.CreateHandoffParams{
+	h, err := qtx.CreateHandoff(ctx, db.CreateHandoffParams{
 		ProjectID:            in.ProjectID,
 		TaskID:               in.TaskID,
 		FromAgent:            in.FromAgent,
@@ -486,11 +510,45 @@ func (s *Service) RecordHandoff(ctx context.Context, in HandoffInput) (*HandoffD
 		return nil, fmt.Errorf("failed to record handoff: %w", err)
 	}
 
-	s.recordEvent(ctx, in.ProjectID, "task.handoff", map[string]interface{}{
+	handoffPayload, _ := json.Marshal(map[string]interface{}{
 		"task_id": in.TaskID,
 		"verdict": in.Verdict,
 		"from":    in.FromAgent,
 	})
+	_, _ = qtx.CreateEvent(ctx, db.CreateEventParams{
+		ProjectID: in.ProjectID,
+		Topic:     "task.handoff",
+		Payload:   handoffPayload,
+	})
+
+	if in.CompleteTask {
+		_, err := qtx.CompleteTask(ctx, db.CompleteTaskParams{
+			ProjectID: in.ProjectID,
+			ID:        in.TaskID,
+			LeaseID:   leaseUUID,
+		})
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return nil, ErrLeaseLost
+			}
+			return nil, fmt.Errorf("failed to complete task during handoff: %w", err)
+		}
+
+		completedPayload, _ := json.Marshal(map[string]interface{}{
+			"id": in.TaskID,
+		})
+		_, _ = qtx.CreateEvent(ctx, db.CreateEventParams{
+			ProjectID: in.ProjectID,
+			Topic:     "task.completed",
+			Payload:   completedPayload,
+		})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit handoff transaction: %w", err)
+	}
+
+	_, _ = s.pool.Exec(ctx, "NOTIFY engram_events, 'ping'")
 
 	idStr := fmt.Sprintf("%x-%x-%x-%x-%x",
 		h.ID.Bytes[0:4], h.ID.Bytes[4:6], h.ID.Bytes[6:8], h.ID.Bytes[8:10], h.ID.Bytes[10:16])

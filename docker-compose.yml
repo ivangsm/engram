@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${ENGRAM_DB_USER:-engram}
       POSTGRES_PASSWORD: ${ENGRAM_DB_PASSWORD:-engram_dev_secret}
     ports:
-      - "${ENGRAM_DB_PORT:-5433}:5432"
+      - "127.0.0.1:${ENGRAM_DB_PORT:-5439}:5432"
     volumes:
       - engram_pgdata:/var/lib/postgresql
       - ./migrations:/docker-entrypoint-initdb.d:ro
@@ -35,6 +35,11 @@ services:
       ENGRAM_DB_SSLMODE: "disable"
       ENGRAM_AUTH_TOKEN: ${ENGRAM_AUTH_TOKEN:-engram_dev_token_2026}
       ENGRAM_MIGRATIONS_DIR: "/app/migrations"
+      ENGRAM_EMBEDDING_PROVIDER: ${ENGRAM_EMBEDDING_PROVIDER:-none}
+      ENGRAM_EMBEDDING_API_KEY: ${ENGRAM_EMBEDDING_API_KEY:-}
+      ENGRAM_EMBEDDING_MODEL: ${ENGRAM_EMBEDDING_MODEL:-}
+      ENGRAM_EMBEDDING_BASE_URL: ${ENGRAM_EMBEDDING_BASE_URL:-}
+      ENGRAM_EMBEDDING_DIMENSIONS: ${ENGRAM_EMBEDDING_DIMENSIONS:-1536}
     ports:
       - "${ENGRAM_PORT:-8085}:8085"
     healthcheck:

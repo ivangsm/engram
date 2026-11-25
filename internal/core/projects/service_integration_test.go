@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 
 	platformdb "github.com/ivan/engram/internal/platform/db"
@@ -14,7 +15,12 @@ func TestService_PostgresIntegration(t *testing.T) {
 	if dbHost == "" {
 		dbHost = "localhost"
 	}
-	dbPort := 5433
+	dbPort := 5439
+	if rawPort := os.Getenv("ENGRAM_DB_PORT"); rawPort != "" {
+		if parsed, err := strconv.Atoi(rawPort); err == nil {
+			dbPort = parsed
+		}
+	}
 	dbUser := "engram"
 	dbPass := "engram_dev_secret"
 	dbName := "engram"

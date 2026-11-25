@@ -13,13 +13,18 @@ Core daemon service binary for Engram hosting the Fiber HTTP web server, Huma v2
 - Configuration Environment Variables:
   - `ENGRAM_PORT`: HTTP listen port (default: `8085`).
   - `ENGRAM_DB_HOST`: PostgreSQL database host (default: `localhost`).
-  - `ENGRAM_DB_PORT`: PostgreSQL port (default: `5433`).
+  - `ENGRAM_DB_PORT`: PostgreSQL port (default: `5439`).
   - `ENGRAM_DB_USER`: Database user (default: `engram`).
   - `ENGRAM_DB_PASSWORD`: Database password (default: `engram_dev_secret`).
   - `ENGRAM_DB_NAME`: Database name (default: `engram`).
   - `ENGRAM_DB_SSLMODE`: SSL connection mode (default: `disable`).
   - `ENGRAM_AUTH_TOKEN`: Pre-shared Bearer token for MCP routes (default: `engram_dev_token_2026`).
   - `ENGRAM_MIGRATIONS_DIR`: Migration files directory (default: `migrations`).
+  - `ENGRAM_EMBEDDING_PROVIDER`: Optional vector embedding provider (`none`, `openai`, `openai-compatible`, `gemini`).
+  - `ENGRAM_EMBEDDING_API_KEY`: API key for configured embedding provider (fail-fast if required and missing).
+  - `ENGRAM_EMBEDDING_MODEL`: Embedding model override (defaults: `text-embedding-3-small`, `gemini-embedding-001`).
+  - `ENGRAM_EMBEDDING_BASE_URL`: Optional API base URL override.
+  - `ENGRAM_EMBEDDING_DIMENSIONS`: Vector dimensions (default: `1536`).
 
 ## Invariants
 - Operates in degraded mode if database connection fails at boot; `GET /healthz` returns HTTP 503 Service Unavailable until database recovery.

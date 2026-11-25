@@ -72,7 +72,7 @@ If the probe returns `ENGRAM_UNAVAILABLE` on a local development machine and Doc
    ```
 2. **Components in Docker:**
    - `engram-daemon`: Container running `ghcr.io/ivangsm/engram:latest` on port `8085`.
-   - `engram-postgres`: Container running `pgvector/pgvector:pg18` on port `5433` (mapped from internal 5432).
+   - `engram-postgres`: Container running `pgvector/pgvector:pg18` on `127.0.0.1:5439` (mapped from internal 5432, overridable via `ENGRAM_DB_PORT`).
 3. **Wait for Health Probe:**
    ```bash
    until curl -sf http://127.0.0.1:8085/healthz > /dev/null 2>&1; do sleep 1; done
@@ -156,27 +156,37 @@ Engram is accessible via JSON-RPC over HTTP (`POST /mcp/message` with Bearer aut
 - **`search_memory(project_id, query, limit?)`**  
   *CLI:* `engram search <project_id> <query> [--limit <n>]`  
   Hybrid rank (cosine vector distance 0.65 + PostgreSQL `ts_rank` 0.35).
-- **`store_memory(project_id, key, content, rationale, digest?, scope?, expected_parent_hash?, author_agent_model?, machine_id?)`**  
-  *CLI:* `engram store <project_id> <key> <content_or_file> --rationale <reason>`  
-  Appends to audit log with SHA-256 hash chaining.
+- **`store_memory(project_id, key, content, rationale, digest?, scope?, expected_parent_hash?, author_user?, author_agent_model?, machine_id?)`**  
+  *CLI:* `engram store <project_id> <key> <content_or_file> --rationale <reason> [--digest <summary>] [--expected-parent-hash <sha256> | --occ] [--author <user>] [--model <model_id>]`  
+  Appends to audit log with SHA-256 hash chaining (omitting `--digest` on updates preserves the prior curated digest).
 - **`blame_memory(project_id, key)`**  
   *CLI:* `engram blame <project_id> <key>`  
   Returns cryptographic genealogy, author, machine, model, rationale, and unified diffs.
 
 ### 4.2 State Plane & Task Tools
 - **`create_task(project_id, task_id, title, description, priority, metadata?)`**  
+  *CLI:* `engram task create <project_id> <task_id> <title> [--desc <text>] [--priority <n>]`  
   Enqueues an operational task with integer priority.
+- **`list_tasks(project_id, status?, limit?)`**  
+  *CLI:* `engram task ls <project_id> [--status <status>] [--limit <n>] [--json]`  
+  Lists operational tasks for a project.
+- **`get_task(project_id, task_id)`**  
+  *CLI:* `engram task get <project_id> <task_id>`  
+  Returns detailed state and active lease metadata for a task.
 - **`claim_task(project_id, task_id?, leased_by?, ttl_seconds?)`**  
-  *CLI:* `engram claim <project_id> [task_id] [--leased-by <id>] [--ttl <seconds>]`  
+  *CLI:* `engram task claim <project_id> [task_id] [--leased-by <id>] [--ttl <seconds>]` (alias: `engram claim ...`)  
   Acquires task lease via `FOR UPDATE SKIP LOCKED`.
 - **`renew_task_lease(project_id, task_id, lease_id, extend_seconds)`**  
+  *CLI:* `engram task renew <project_id> <task_id> --lease <lease_id> [--ttl <seconds>]`  
   Fenced lease renewal; fails with `ERR_LEASE_LOST` if `lease_id` does not match active lease.
-- **`record_handoff(project_id, task_id, from_agent, to_agent?, verdict, summary, reproducible_evidence, artifacts?)`**  
-  *CLI:* `engram handoff <project_id> <task_id> <verdict> <summary> <evidence>`  
-  Records immutable handoff record.
+- **`record_handoff(project_id, task_id, from_agent, to_agent?, verdict, summary, reproducible_evidence, artifacts?, complete_task?, lease_id?)`**  
+  *CLI:* `engram handoff <project_id> <task_id> <verdict> <summary> <evidence> [--from-agent <id>] [--complete --lease <lease_id>]`  
+  Records immutable handoff record (and optionally completes the task atomically with `--complete`).
 - **`complete_task(project_id, task_id, lease_id?)`**  
+  *CLI:* `engram task complete <project_id> <task_id> [--lease <lease_id>]`  
   Marks task `completed` and releases locks.
 - **`fail_task(project_id, task_id, lease_id?, reason)`**  
+  *CLI:* `engram task fail <project_id> <task_id> [--lease <lease_id>] [--reason <text>]`  
   Marks task `failed` with recorded autopsy reason.
 
 ---

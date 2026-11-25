@@ -216,6 +216,8 @@ func TestMCPServer_InitializeAndToolsList(t *testing.T) {
 		"store_memory",
 		"blame_memory",
 		"create_task",
+		"list_tasks",
+		"get_task",
 		"claim_task",
 		"renew_task_lease",
 		"record_handoff",

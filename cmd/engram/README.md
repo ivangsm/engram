@@ -5,14 +5,17 @@ Command-line interface (CLI) companion for Engram providing direct developer acc
 
 ## Interface
 - `main` (`cmd/engram/main.go:main`): CLI entry point supporting subcommands:
+  - `init [--project <id>] [--name <name>] [--docs <dir>] [--todo <file>]`
+  - `project <ls|get|create|rm> [arguments]`
   - `manifest <project_id> [--scope <scope>]`
   - `recall <project_id> <key>`
   - `search <project_id> <query> [--limit <n>]`
-  - `store <project_id> <key> <content_or_file> --rationale <reason> [--scope <scope>] [--task <task_id>]`
+  - `store <project_id> <key> <content_or_file> --rationale <reason> [--digest <summary>] [--scope <scope>] [--task <task_id>] [--expected-parent-hash <sha256>] [--occ] [--author <user>] [--model <model_id>] [--machine-id <host>]`
   - `blame <project_id> <key>`
+  - `task <ls|get|create|claim|renew|complete|fail> [arguments]`
   - `claim <project_id> [task_id] [--leased-by <id>] [--ttl <seconds>]`
-  - `handoff <project_id> <task_id> <verdict> <summary> <evidence>`
-  - `version`
+  - `handoff <project_id> <task_id> <verdict> <summary> <evidence> [--from-agent <id>] [--to-agent <id>] [--artifacts <json>] [--complete] [--lease <lease_id>]`
+  - `help`, `-h`, `--help`, `version`
 
 ## Invariants
 - `len(os.Args) >= 2` required; otherwise prints usage and terminates with exit code 1.

@@ -39,6 +39,8 @@ type HandoffInput struct {
 	Summary              string          `json:"summary"`
 	ReproducibleEvidence string          `json:"reproducible_evidence"`
 	Artifacts            json.RawMessage `json:"artifacts,omitempty"`
+	CompleteTask         bool            `json:"complete_task,omitempty"`
+	LeaseID              string          `json:"lease_id,omitempty"`
 }
 
 func ValidateHandoff(in HandoffInput) error {

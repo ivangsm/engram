@@ -49,11 +49,17 @@ plugins/engram/
 
 ### Estado y Tareas
 - `create_task(project_id, task_id, title, description, priority, metadata?)`: Encolado de tareas operativas.
+- `list_tasks(project_id, status?, limit?)`: Listado de tareas por proyecto y estado.
+- `get_task(project_id, task_id)`: Consulta de estado y lease activo de una tarea.
 - `claim_task(project_id, task_id?, leased_by?, ttl_seconds?)`: Reclamo atómico con lease UUID.
 - `renew_task_lease(project_id, task_id, lease_id, extend_seconds)`: Renovación cercada de lease.
-- `record_handoff(project_id, task_id, from_agent, to_agent?, verdict, summary, reproducible_evidence, artifacts?)`: Entrega inmutable de tarea.
+- `record_handoff(project_id, task_id, from_agent, to_agent?, verdict, summary, reproducible_evidence, artifacts?, complete_task?, lease_id?)`: Entrega inmutable de tarea (con cierre atómico opcional vía `complete_task`).
 - `complete_task(project_id, task_id, lease_id?)`: Marcado de tarea completada y liberación de locks.
 - `fail_task(project_id, task_id, lease_id?, reason)`: Registro de fallo con autopsia.
+
+## Modo CLI-only (Cero Consumo de Tokens MCP)
+
+Si prefieres operar exclusivamente mediante el binario `engram` desde terminal sin inyectar schemas MCP en cada turno del modelo, puedes eliminar o vaciar `mcp_config.json` en tu copia instalada del plugin; el hook `SessionStart`, las reglas (`AGENTS.md`) y la skill (`SKILL.md`) seguirán operando normalmente con el CLI.
 
 ## Instalación Global en Antigravity
 

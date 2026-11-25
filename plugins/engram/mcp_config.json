@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "engram": {
-      "serverUrl": "${ENGRAM_SERVER_URL:-http://127.0.0.1:8085}/mcp/message",
+      "serverUrl": "http://127.0.0.1:8085/mcp/message",
       "headers": {
-        "Authorization": "Bearer ${ENGRAM_AUTH_TOKEN:-engram_dev_token_2026}",
+        "Authorization": "Bearer engram_dev_token_2026",
         "Accept": "application/json, text/event-stream"
       }
     }
